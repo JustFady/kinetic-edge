@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════════════════════════════
 // Kinetic-Edge Referee Assistant — Frontend App
-// WebSocket client, drag-drop upload, canvas renderer, alert feed
+// Offline Desktop & Web Video AI Analysis Engine
 // ══════════════════════════════════════════════════════════════════════════════
 
 const API_BASE = window.location.origin;
@@ -10,7 +10,7 @@ const WS_BASE = `ws://${window.location.host}`;
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
 const browseBtn = document.getElementById('browse-btn');
-const videoSection = document.getElementById('video-section');
+const newClipBtn = document.getElementById('new-clip-btn');
 const videoContainer = document.getElementById('video-container');
 const canvas = document.getElementById('video-canvas');
 const ctx = canvas.getContext('2d');
@@ -19,6 +19,11 @@ const alertsList = document.getElementById('alerts-list');
 const clearAlertsBtn = document.getElementById('clear-alerts');
 const statusBadge = document.getElementById('status-badge');
 const statusText = statusBadge.querySelector('.status-text');
+
+// Controls
+const pauseBtn = document.getElementById('pause-btn');
+const slowmoBtn = document.getElementById('slowmo-btn');
+const exportBtn = document.getElementById('export-btn');
 
 // Stats
 const statFps = document.querySelector('#stat-fps .stat-value');
@@ -33,6 +38,10 @@ let alertWs = null;
 let alertCount = 0;
 let frameCount = 0;
 let totalFrames = 0;
+let isPaused = false;
+let isSlowMo = false;
+let frameBuffer = [];
+let recordedFrames = [];
 let fpsCounter = { frames: 0, lastTime: performance.now(), fps: 0 };
 
 // ── Status Updates ───────────────────────────────────────────────────────────
@@ -80,14 +89,44 @@ dropZone.addEventListener('drop', (e) => {
     if (files.length > 0) uploadFile(files[0]);
 });
 
-// ── File Upload ──────────────────────────────────────────────────────────────
+// ── Reset for New Clip ───────────────────────────────────────────────────────
+newClipBtn.addEventListener('click', () => {
+    if (feedWs) feedWs.close();
+    if (alertWs) alertWs.close();
+    
+    currentJobId = null;
+    frameCount = 0;
+    totalFrames = 0;
+    alertCount = 0;
+    frameBuffer = [];
+    recordedFrames = [];
+    isPaused = false;
+    
+    pauseBtn.textContent = "⏸️ Pause";
+    pauseBtn.classList.remove('active');
+    
+    statFps.textContent = "0";
+    statPlayers.textContent = "0";
+    statAlerts.textContent = "0";
+    statFrames.textContent = "0 / 0";
+    progressFill.style.width = "0%";
+    
+    videoContainer.classList.add('hidden');
+    dropZone.classList.remove('hidden');
+    newClipBtn.classList.add('hidden');
+    
+    clearAlertsBtn.click();
+    setStatus('ready', 'Ready (Offline)');
+});
+
+// ── File Upload & Analysis Initiation ────────────────────────────────────────
 async function uploadFile(file) {
     if (!file.type.startsWith('video/') && !file.name.match(/\.(mp4|mov|avi|mkv)$/i)) {
-        addAlert('error', 'Invalid File', 'Please upload a video file (MP4, MOV, AVI, MKV)');
+        addAlert('error', 'Invalid File', 'Please select a valid game video clip');
         return;
     }
 
-    setStatus('processing', 'Uploading...');
+    setStatus('processing', 'Loading Clip...');
     dropZone.classList.add('uploading');
 
     const formData = new FormData();
@@ -99,7 +138,7 @@ async function uploadFile(file) {
             body: formData,
         });
 
-        if (!response.ok) throw new Error(`Upload failed: ${response.statusText}`);
+        if (!response.ok) throw new Error(`Analysis failed: ${response.statusText}`);
 
         const data = await response.json();
         currentJobId = data.job_id;
@@ -110,18 +149,19 @@ async function uploadFile(file) {
         dropZone.classList.add('hidden');
         dropZone.classList.remove('uploading');
         videoContainer.classList.remove('hidden');
+        newClipBtn.classList.remove('hidden');
 
-        setStatus('processing', 'Analyzing...');
+        setStatus('processing', 'AI Analysis Active');
         statFrames.textContent = `0 / ${totalFrames}`;
 
         // Connect WebSockets
         connectFeedWs(currentJobId);
         connectAlertWs(currentJobId);
     } catch (err) {
-        console.error('Upload error:', err);
-        setStatus('error', 'Upload Failed');
+        console.error('Processing error:', err);
+        setStatus('error', 'Analysis Failed');
         dropZone.classList.remove('uploading');
-        addAlert('error', 'Upload Error', err.message);
+        addAlert('error', 'Processing Error', err.message);
     }
 }
 
@@ -132,13 +172,13 @@ function connectFeedWs(jobId) {
     feedWs = new WebSocket(`${WS_BASE}/ws/feed/${jobId}`);
     feedWs.binaryType = 'blob';
 
-    feedWs.onmessage = (event) => {
+    feedWs.onmessage = async (event) => {
         if (typeof event.data === 'string') {
-            // JSON metadata message
             try {
                 const meta = JSON.parse(event.data);
                 if (meta.type === 'done') {
                     setStatus('done', 'Analysis Complete');
+                    progressFill.style.width = '100%';
                     return;
                 }
                 if (meta.type === 'frame_meta') {
@@ -155,15 +195,9 @@ function connectFeedWs(jobId) {
 
         // Binary: JPEG frame
         const blob = event.data;
-        const img = new Image();
-        img.onload = () => {
-            canvas.width = img.width;
-            canvas.height = img.height;
-            ctx.drawImage(img, 0, 0);
-            URL.revokeObjectURL(img.src);
-            updateFps();
-        };
-        img.src = URL.createObjectURL(blob);
+        if (!isPaused) {
+            renderFrameBlob(blob);
+        }
     };
 
     feedWs.onclose = () => {
@@ -175,6 +209,49 @@ function connectFeedWs(jobId) {
 
     feedWs.onerror = () => setStatus('error', 'Connection Lost');
 }
+
+function renderFrameBlob(blob) {
+    const img = new Image();
+    img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(img.src);
+        updateFps();
+    };
+    img.src = URL.createObjectURL(blob);
+}
+
+// ── Playback Controls ────────────────────────────────────────────────────────
+pauseBtn.addEventListener('click', () => {
+    isPaused = !isPaused;
+    if (isPaused) {
+        pauseBtn.textContent = "▶️ Resume";
+        pauseBtn.classList.add('active');
+    } else {
+        pauseBtn.textContent = "⏸️ Pause";
+        pauseBtn.classList.remove('active');
+    }
+});
+
+slowmoBtn.addEventListener('click', () => {
+    isSlowMo = !isSlowMo;
+    if (isSlowMo) {
+        slowmoBtn.classList.add('active');
+        slowmoBtn.textContent = "⚡ 1.0x Normal";
+    } else {
+        slowmoBtn.classList.remove('active');
+        slowmoBtn.textContent = "🐢 0.5x Slow-Mo";
+    }
+});
+
+exportBtn.addEventListener('click', () => {
+    if (currentJobId) {
+        window.open(`/api/download/${currentJobId}`, '_blank');
+    } else {
+        alert("Please run an analysis first to export the annotated video.");
+    }
+});
 
 // ── WebSocket: Alerts ────────────────────────────────────────────────────────
 function connectAlertWs(jobId) {
@@ -220,7 +297,6 @@ function formatAlertType(type) {
 
 // ── Alert Rendering ──────────────────────────────────────────────────────────
 function addAlert(severity, title, detail, frameId) {
-    // Remove empty state
     const emptyState = alertsList.querySelector('.empty-state');
     if (emptyState) emptyState.remove();
 
@@ -230,7 +306,7 @@ function addAlert(severity, title, detail, frameId) {
     const card = document.createElement('div');
     card.className = `alert-card ${severity}`;
 
-    const timeStr = frameId ? `Frame ${frameId}` : new Date().toLocaleTimeString();
+    const timeStr = frameId ? `Frame #${frameId}` : new Date().toLocaleTimeString();
 
     card.innerHTML = `
         <div class="alert-header">
@@ -243,7 +319,6 @@ function addAlert(severity, title, detail, frameId) {
     // Prepend (newest on top)
     alertsList.insertBefore(card, alertsList.firstChild);
 
-    // Keep max 200 alerts
     while (alertsList.children.length > 200) {
         alertsList.removeChild(alertsList.lastChild);
     }
@@ -254,8 +329,8 @@ clearAlertsBtn.addEventListener('click', () => {
     alertsList.innerHTML = `
         <div class="empty-state">
             <div class="empty-icon">📋</div>
-            <p>No alerts yet</p>
-            <span>Upload a game clip to start analysis</span>
+            <p>No referee calls yet</p>
+            <span>Load game video to begin automated tracking</span>
         </div>
     `;
     alertCount = 0;
@@ -263,4 +338,4 @@ clearAlertsBtn.addEventListener('click', () => {
 });
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-setStatus('ready', 'Ready');
+setStatus('ready', 'Ready (Offline)');

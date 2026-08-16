@@ -9,54 +9,38 @@ BUILD_DIR     := build
 VIDEO         ?= data/sample.mp4
 CONFIG        ?= config/pipeline.yaml
 
-.PHONY: all docker-build docker-run run clean help
+.PHONY: all app web build-cpp install-python run clean help
 
 # ── Default Target ────────────────────────────────────────────────────────────
-all: docker-build
+all: app
 
-# ── Docker Targets ────────────────────────────────────────────────────────────
+# ── Desktop App (Offline Native Window) ───────────────────────────────────────
+## Launch the 100% offline standalone desktop app window
+app: install-python build-cpp
+	.venv/bin/python3 desktop.py
 
-## Build the Docker image
-docker-build:
-	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) .
+# ── Web Server ────────────────────────────────────────────────────────────────
+## Launch local web server (accessible via browser at localhost:8000)
+web: install-python build-cpp
+	.venv/bin/python3 server.py
 
-## Run the pipeline inside Docker (mount local data/ for video input)
-docker-run: docker-build
-	docker run --rm \
-		--name $(CONTAINER) \
-		-v $(CURDIR)/data:/app/data:ro \
-		-v $(CURDIR)/output:/app/output \
-		$(IMAGE_NAME):$(IMAGE_TAG) \
-		--config /app/config/pipeline.yaml \
-		--video /app/data/$(notdir $(VIDEO))
-
-## Interactive shell inside the container (for debugging)
-docker-shell: docker-build
-	docker run --rm -it \
-		--entrypoint /bin/bash \
-		-v $(CURDIR)/data:/app/data \
-		-v $(CURDIR)/output:/app/output \
-		$(IMAGE_NAME):$(IMAGE_TAG)
-
-# ── Local Build Targets (require host dependencies) ──────────────────────────
-
+# ── Local Build Targets ───────────────────────────────────────────────────────
 ## Build C++ ingest binary locally
 build-cpp:
 	cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release .
-	cmake --build $(BUILD_DIR) --parallel $$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+	cmake --build $(BUILD_DIR) --parallel $$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
 
 ## Install Python dependencies locally (use a venv)
 install-python:
 	python3 -m venv .venv
-	.venv/bin/pip install --upgrade pip
-	.venv/bin/pip install -r python/requirements.txt
+	.venv/bin/pip install --upgrade pip -q
+	.venv/bin/pip install -r python/requirements.txt -q
 
-## Run the pipeline locally (requires both build-cpp and install-python)
+## Run the CLI pipeline locally
 run: build-cpp install-python
 	bash scripts/run_pipeline.sh --config $(CONFIG) --video $(VIDEO)
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
-
 ## Download a sample basketball video
 download-sample:
 	bash scripts/download_sample.sh
@@ -67,23 +51,15 @@ clean:
 	find . -name "*.pyc" -delete
 	find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
-## Remove Docker image
-docker-clean:
-	docker rmi $(IMAGE_NAME):$(IMAGE_TAG) 2>/dev/null || true
-
 # ── Help ──────────────────────────────────────────────────────────────────────
-
 help:
 	@echo ""
-	@echo "  Project Kinetic-Edge — Build & Run"
-	@echo "  ─────────────────────────────────────────────"
-	@echo "  make docker-build     Build Docker image"
-	@echo "  make docker-run       Run pipeline in Docker"
-	@echo "  make docker-shell     Interactive debug shell"
+	@echo "  Project Kinetic-Edge — Offline Referee Assistant"
+	@echo "  ─────────────────────────────────────────────────"
+	@echo "  make app              Launch standalone offline desktop app"
+	@echo "  make web              Run local web server UI (localhost:8000)"
 	@echo "  make build-cpp        Build C++ binary locally"
-	@echo "  make install-python   Set up Python venv"
-	@echo "  make run              Run pipeline locally"
-	@echo "  make download-sample  Download sample video"
+	@echo "  make install-python   Set up Python venv with offline deps"
+	@echo "  make run              Run CLI pipeline locally"
 	@echo "  make clean            Remove build artifacts"
-	@echo "  make docker-clean     Remove Docker image"
 	@echo ""

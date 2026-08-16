@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Kinetic-Edge Basketball Referee Assistant — AI-powered video analysis for real-time referee support">
+    <meta name="description" content="Kinetic-Edge Basketball Referee Assistant — AI-powered offline video analysis for real-time referee support">
     <title>Kinetic-Edge | Referee Assistant</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,7 +17,7 @@
             <div class="logo-icon">⚡</div>
             <div>
                 <h1>KINETIC-EDGE</h1>
-                <span class="subtitle">Referee Assistant</span>
+                <span class="subtitle">Offline Referee Assistant</span>
             </div>
         </div>
         <div class="stats">
@@ -38,9 +38,14 @@
                 <span class="stat-label">Frames</span>
             </div>
         </div>
-        <div class="status-badge" id="status-badge">
-            <span class="status-dot"></span>
-            <span class="status-text">Ready</span>
+        <div class="status-actions">
+            <button id="new-clip-btn" class="btn-action hidden" title="Analyze New Clip">
+                <span>➕ New Clip</span>
+            </button>
+            <div class="status-badge" id="status-badge">
+                <span class="status-dot"></span>
+                <span class="status-text">Ready (Offline)</span>
+            </div>
         </div>
     </header>
 
@@ -58,9 +63,9 @@
                         </svg>
                     </div>
                     <h2>Drop a Game Clip</h2>
-                    <p>Drag & drop an .mp4 video or <button id="browse-btn" class="browse-link">browse files</button></p>
+                    <p>Drag & drop any basketball footage or <button id="browse-btn" class="browse-link">browse files</button></p>
                     <input type="file" id="file-input" accept="video/mp4,video/*" hidden>
-                    <div class="supported-formats">MP4 · MOV · AVI · MKV</div>
+                    <div class="supported-formats">100% Offline · YOLOv8 Local AI · MP4 / MOV / AVI</div>
                 </div>
                 <div class="drop-zone-border"></div>
             </div>
@@ -69,8 +74,16 @@
             <div id="video-container" class="video-container hidden">
                 <canvas id="video-canvas"></canvas>
                 <div id="video-overlay" class="video-overlay">
-                    <div class="overlay-badge" id="overlay-mode">ANALYZING</div>
+                    <div class="overlay-badge" id="overlay-mode">AI TRACKING ACTIVE</div>
                 </div>
+                
+                <!-- Referee Decision Controls -->
+                <div class="referee-controls">
+                    <button id="pause-btn" class="control-btn" title="Pause / Resume">⏸️ Pause</button>
+                    <button id="slowmo-btn" class="control-btn" title="Toggle Slow Motion Replay">🐢 0.5x Slow-Mo</button>
+                    <button id="export-btn" class="control-btn" title="Open Annotated Clip">🎬 Open Output Clip</button>
+                </div>
+
                 <!-- Progress bar -->
                 <div id="progress-bar" class="progress-bar">
                     <div id="progress-fill" class="progress-fill"></div>
@@ -81,14 +94,14 @@
         <!-- Alerts Sidebar -->
         <aside id="alerts-panel">
             <div class="panel-header">
-                <h2>🏀 Referee Alerts</h2>
+                <h2>🏀 Referee Decision Feed</h2>
                 <button id="clear-alerts" class="btn-icon" title="Clear alerts">✕</button>
             </div>
             <div id="alerts-list" class="alerts-list">
                 <div class="empty-state">
                     <div class="empty-icon">📋</div>
-                    <p>No alerts yet</p>
-                    <span>Upload a game clip to start analysis</span>
+                    <p>No referee calls yet</p>
+                    <span>Load game video to begin automated tracking</span>
                 </div>
             </div>
         </aside>
