@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kinetic-edge"
+version = "1.0.0"
+description = "Ultra-low-latency 100% offline AI basketball referee assistant and edge video tracking pipeline."
+readme = "README.md"
+authors = [
+    { name = "JustFady" }
+]
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Video"
+]
+requires-python = ">=3.9"
+dependencies = [
+    "ultralytics>=8.0.0",
+    "onnxruntime>=1.15.0",
+    "pyzmq>=25.0.0",
+    "numpy>=1.24.0",
+    "opencv-python>=4.8.0",
+    "pyyaml>=6.0",
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "python-multipart>=0.0.6",
+    "websockets>=11.0",
+    "pywebview>=5.0.0"
+]
+
+[project.scripts]
+kinetic-edge = "kinetic_edge.cli:main"
+
+[tool.setuptools]
+packages = ["kinetic_edge"]
