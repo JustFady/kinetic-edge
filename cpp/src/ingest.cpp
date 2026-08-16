@@ -12,6 +12,7 @@
 #include <cstring>
 #include <csignal>
 #include <atomic>
+#include <thread> // Added for sleep
 
 static std::atomic<bool> g_running{true};
 
@@ -80,14 +81,13 @@ int main(int argc, char* argv[]) {
     zmq::context_t ctx(1);
     zmq::socket_t  sender(ctx, zmq::socket_type::push);
     sender.set(zmq::sockopt::sndhwm, cfg.send_hwm);
-    sender.set(zmq::sockopt::linger, 1000);
+    sender.set(zmq::sockopt::linger, 2000); // 2 seconds socket linger
     sender.connect(cfg.zmq_endpoint);
 
     cv::Mat frame, resized;
     resized.create(cfg.target_height, cfg.target_width, CV_8UC3);
 
     uint32_t frame_id = 0, sent_count = 0, dropped = 0;
-    auto t_start = std::chrono::steady_clock::now();
 
     while (g_running && cap.read(frame)) {
         frame_id++;
@@ -117,8 +117,8 @@ int main(int argc, char* argv[]) {
             dropped++;
         }
 
-        if (sent_count % 100 == 0 && sent_count > 0) {
-            std::cout << "  [ingest] frame " << frame_id << " sent\n";
+        if (sent_count % 50 == 0 && sent_count > 0) {
+            std::cout << "  [ingest] frame " << frame_id << " sent (dropped: " << dropped << ")\n";
         }
     }
 
@@ -128,7 +128,11 @@ int main(int argc, char* argv[]) {
         sender.send(sentinel, zmq::send_flags::none);
     }
 
-    std::cout << "Ingestion Complete. Sent: " << sent_count << "\n";
+    std::cout << "Ingestion Complete. Sent: " << sent_count << " (dropped: " << dropped << ")\n";
+    
+    // Sleep to allow ZMQ background threads to flush messages to the consumer
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
     sender.close();
     ctx.close();
     return 0;

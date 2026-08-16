@@ -47,17 +47,26 @@ class UltralyticsBackend(ModelBackend):
         self._model = None
         self._conf = 0.35
         self._iou = 0.45
-        self._targets = []
+        self._targets = None
 
     def load(self, model_path, confidence=0.35, iou_threshold=0.45, target_classes=None):
         from ultralytics import YOLO
         self._model = YOLO(model_path)
         self._conf = confidence
         self._iou = iou_threshold
-        self._targets = target_classes or []
+        self._targets = target_classes if target_classes else None
 
     def predict(self, frame, frame_id):
-        results = self._model.track(frame, persist=True, conf=self._conf, iou=self._iou, classes=self._targets, verbose=False, tracker="bytetrack.yaml")
+        # Pass None instead of empty list so we track classes correctly
+        results = self._model.track(
+            frame, 
+            persist=True, 
+            conf=self._conf, 
+            iou=self._iou, 
+            classes=self._targets, 
+            verbose=False, 
+            tracker="bytetrack.yaml"
+        )
         detections = []
         if results and results[0].boxes is not None:
             for box in results[0].boxes:
