@@ -1,0 +1,68 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Project Kinetic-Edge — Pipeline Configuration
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Video Ingestion (C++) ─────────────────────────────────────────────────────
+ingestion:
+  # Target resolution for frame normalization (width x height)
+  resolution:
+    width: 640
+    height: 480
+  # Maximum frames to process (0 = all frames)
+  max_frames: 0
+  # Frame skip interval (1 = every frame, 2 = every other, etc.)
+  frame_skip: 1
+
+# ── IPC Configuration ────────────────────────────────────────────────────────
+ipc:
+  # Transport: "zmq" (ZeroMQ PUSH/PULL) or "pipe" (stdin/stdout)
+  transport: zmq
+  zmq:
+    endpoint: "tcp://127.0.0.1:5555"
+    # High-water mark: max queued messages before blocking sender
+    send_hwm: 100
+    recv_hwm: 100
+    # Receive timeout in milliseconds (-1 = infinite)
+    recv_timeout_ms: 5000
+
+# ── Inference (Python) ───────────────────────────────────────────────────────
+inference:
+  # Backend: "ultralytics" (native YOLOv8) or "onnx" (ONNX Runtime)
+  backend: ultralytics
+  # Model identifier or path
+  model:
+    ultralytics: yolov8n.pt
+    onnx: yolov8n.onnx
+  # Confidence threshold for detections
+  confidence: 0.35
+  # NMS IoU threshold
+  iou_threshold: 0.45
+  # COCO class IDs to track (0 = person, 32 = sports ball)
+  target_classes: [0, 32]
+
+# ── Tracking & Anomaly Detection ─────────────────────────────────────────────
+tracking:
+  # ByteTrack parameters
+  track_high_thresh: 0.5
+  track_low_thresh: 0.1
+  match_thresh: 0.8
+  # Kinetic anomaly heuristic
+  anomaly:
+    # Velocity threshold (pixels/second) — flag if exceeded
+    acceleration_sigma: 2.0
+    # Velocity history window (frames) for running average
+    velocity_window: 15
+    # Court boundary (normalized 0-1 coordinates: [x_min, y_min, x_max, y_max])
+    # Default: full frame (no boundary enforcement)
+    court_boundary: [0.05, 0.05, 0.95, 0.95]
+
+# ── Telemetry & Logging ──────────────────────────────────────────────────────
+telemetry:
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  log_level: INFO
+  # Output path for JSON-lines telemetry log
+  output_path: output/telemetry.jsonl
+  # Print per-frame latency to stdout
+  print_latency: true
+  # Print summary statistics on completion
+  print_summary: true

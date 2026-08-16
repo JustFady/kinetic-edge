@@ -1,0 +1,16 @@
+# ── AI / Inference ────────────────────────────────────────────────────────────
+ultralytics>=8.0.0          # YOLOv8 detection + tracking
+onnxruntime>=1.15.0         # ONNX Runtime inference backend
+
+# ── IPC ───────────────────────────────────────────────────────────────────────
+pyzmq>=25.0.0               # ZeroMQ Python bindings
+
+# ── Data / Compute ────────────────────────────────────────────────────────────
+numpy>=1.24.0               # Array operations
+opencv-python-headless>=4.8.0  # Frame decoding (headless — no GUI deps)
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+pyyaml>=6.0                 # YAML config parsing
+
+# ── Telemetry / Logging ──────────────────────────────────────────────────────
+# (stdlib logging + json used — no extra deps)
