@@ -23,3 +23,6 @@ output/
 # OS
 .DS_Store
 Thumbs.db
+yolov8n.pt
+*.pt
+*.onnx

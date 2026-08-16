@@ -19,7 +19,7 @@ endif()
 add_compile_options(-Wall -Wextra -Wpedantic)
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
-find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc videoio highgui)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc videoio highgui)
 find_package(cppzmq REQUIRED)
 
 message(STATUS "OpenCV version: ${OpenCV_VERSION}")
