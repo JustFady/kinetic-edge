@@ -11,3 +11,9 @@ opencv-python>=4.8.0        # Frame decoding and GUI support
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 pyyaml>=6.0                 # YAML config parsing
+
+# ── Web Server ────────────────────────────────────────────────────────────────
+fastapi>=0.100.0            # Web framework
+uvicorn[standard]>=0.23.0   # ASGI server with WebSocket support
+python-multipart>=0.0.6     # File upload support
+websockets>=11.0            # WebSocket protocol
