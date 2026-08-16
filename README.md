@@ -1,74 +1,89 @@
-# Project Kinetic-Edge
+# Project Kinetic-Edge — Basketball Referee Assistant
 
-**Local Video AI Evaluation Pipeline** — A proof-of-concept system for evaluating the latency and accuracy of local AI inference models (YOLOv8) on fast-moving subjects.
+**Kinetic-Edge** is an ultra-low-latency, 100% offline AI video processing pipeline and standalone desktop assistant designed to track players, basketballs, and assist referee decision-making (out-of-bounds, fouls, and rapid kinetic anomalies).
 
-## Architecture
+![Kinetic-Edge Architecture](https://img.shields.io/badge/Architecture-C%2B%2B%20%2B%20Python%20%2B%20ZMQ-blue)
+![Offline Ready](https://img.shields.io/badge/Offline-100%25%20Local-green)
+![AI Model](https://img.shields.io/badge/Model-YOLOv8%20%2B%20ByteTrack-orange)
+
+---
+
+## 🏗️ Architecture
 
 ```
-┌─────────────────┐     ZMQ PUSH/PULL      ┌──────────────────────┐
-│  C++ Ingestion   │ ──────────────────────▶ │  Python Inference     │
-│  (ingest.cpp)    │   tcp://127.0.0.1:5555  │  (inference.py)       │
-│                  │                         │                       │
-│  • Read .mp4     │   Frame Wire Format:    │  • YOLOv8 Detection   │
-│  • Resize frames │   [ts|id|w|h|c|pixels]  │  • ByteTrack Tracking │
-│  • Timestamp     │                         │  • Anomaly Heuristics │
-│  • Serialize     │                         │  • Latency Telemetry  │
-└─────────────────┘                         └──────────────────────┘
-                                                       │
-                                                       ▼
-                                              output/telemetry.jsonl
+┌──────────────────────────────────────────────────────────────┐
+│             Kinetic-Edge Desktop Application (.app)           │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │              Native Window (WebKit / PyWebView)        │  │
+│  │  - Drag & Drop Clip Loader                             │  │
+│  │  - Live Hardware-Accelerated Canvas Rendering          │  │
+│  │  - Referee Decision & Fouls Alert Feed                 │  │
+│  │  - Playback Controls (Pause / Resume / Slow-Mo)        │  │
+│  └───────────────────────────▲────────────────────────────┘  │
+│                              │ Local In-Memory WebSocket      │
+│  ┌───────────────────────────▼────────────────────────────┐  │
+│  │               Local Desktop Backend (Offline)          │  │
+│  │  - Offline YOLOv8 Weights (cached locally)             │  │
+│  │  - Kinetic Anomaly & Boundary Rule Engine              │  │
+│  │  - C++ High-Throughput Video Ingestion                 │  │
+│  │  - ZeroMQ IPC Transport                                │  │
+│  └────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-## Quick Start
+---
 
-### Docker (Recommended)
+## ⚡ Quick Start
 
+### 1. Launch Offline Desktop App (Recommended)
 ```bash
-# 1. Place your .mp4 video in data/
-cp /path/to/basketball.mp4 data/sample.mp4
-
-# 2. Build and run
-make docker-build
-make docker-run
-
-# Or download a sample video first
-make download-sample
-make docker-run
+make app
 ```
+*(Or directly run `.venv/bin/python3 desktop.py`)*
 
-### Local Build
-
+### 2. Launch Local Web Interface
 ```bash
-# Prerequisites: cmake, opencv4, libzmq, python3
-make build-cpp
-make install-python
-make run VIDEO=data/sample.mp4
+make web
+```
+Open `http://localhost:8000` in your browser.
+
+### 3. Run CLI Pipeline with C++ Ingestion
+```bash
+make run VIDEO=data/nba_gameplay.mp4
 ```
 
-## Configuration
+---
 
-Edit `config/pipeline.yaml` to configure:
-- **Resolution**: Target frame size for normalization
-- **Model backend**: `ultralytics` (native PyTorch) or `onnx` (ONNX Runtime)
-- **Model size**: `yolov8n.pt`, `yolov8s.pt`, `yolov8m.pt`
-- **Anomaly thresholds**: Acceleration sigma, court boundaries
-- **Telemetry**: Log level, output format
-
-## Project Structure
+## 📁 Project Structure
 
 ```
 kinetic-edge/
-├── CMakeLists.txt          # Top-level CMake config
-├── Dockerfile              # Ubuntu 22.04 build environment
-├── Makefile                # Build/run orchestration
-├── config/pipeline.yaml    # Runtime configuration
-├── cpp/                    # C++ video ingestion module
-├── python/                 # Python inference + tracking
-├── scripts/                # Pipeline launcher & utilities
-├── data/                   # Video input directory
-└── output/                 # Telemetry & results
+├── desktop.py              # Standalone offline desktop app entrypoint
+├── server.py               # Local FastAPI backend & WebSocket stream
+├── REPORT.md               # SWaP-C and latency evaluation report
+├── Makefile                # Build, run, and app orchestration
+├── CMakeLists.txt          # C++ build configuration
+├── config/
+│   └── pipeline.yaml       # Runtime config (resolution, thresholds, models)
+├── cpp/
+│   ├── CMakeLists.txt
+│   ├── include/ingest.h    # C++ frame ingestion header
+│   └── src/ingest.cpp      # High-performance OpenCV + ZMQ streamer
+├── python/
+│   ├── requirements.txt    # Python dependencies
+│   ├── inference.py        # YOLOv8 tracking & anomaly analysis
+│   ├── tracker.py          # Modular backends & anomaly heuristics
+│   ├── ipc_receiver.py     # ZeroMQ frame deserializer
+│   └── telemetry.py        # Latency & FPS logging
+├── web/
+│   ├── index.html          # Dark glassmorphic referee UI
+│   ├── style.css           # Design system
+│   └── app.js              # WebSocket frame renderer & alert feed
+└── data/                   # Video inputs (.gitignore)
 ```
 
-## License
+---
 
-Internal use — Evaluation prototype.
+## 📊 Evaluation Report
+See [REPORT.md](REPORT.md) for detailed latency benchmarks, SWaP-C analysis, and deployment recommendations.
