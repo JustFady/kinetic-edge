@@ -9,6 +9,8 @@ Kinetic-Edge is an offline video processing pipeline and standalone desktop tool
 ## Live Demo & Links
 
 - **Interactive Web Demo**: [https://justfady.github.io/kinetic-edge/](https://justfady.github.io/kinetic-edge/)
+- **Hugging Face Space**: [https://huggingface.co/spaces/JustFady/kinetic-edge](https://huggingface.co/spaces/JustFady/kinetic-edge)
+- **PyPI Package**: [https://pypi.org/project/kinetic-edge/](https://pypi.org/project/kinetic-edge/)
 - **Latest Release**: [v1.0.0 Desktop App](https://github.com/JustFady/kinetic-edge/releases/tag/v1.0.0)
 - **Technical Report**: [REPORT.md](REPORT.md)
 - **Product Roadmap**: [ROADMAP.md](ROADMAP.md)
