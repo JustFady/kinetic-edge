@@ -1,212 +1,328 @@
 /**
- * Kinetic-Edge — Interactive Computer Vision Showcase & Referee Analytics
+ * Kinetic-Edge — Basketball Computer Vision & Referee Analytics Simulation
  */
 
-// ── State Management ─────────────────────────────────────────────────────────
+// ── Application State ────────────────────────────────────────────────────────
 const state = {
-    mode: 'demo', // 'demo' | 'upload'
-    isPlaying: false,
+    mode: 'sim', // 'sim' | 'upload'
+    isPlaying: true,
     isSlowMo: false,
+    currentTime: 0.0,
+    duration: 22.5, // 22.5 second full possession loop
+    shotClock: 24.0,
+    possessionTrack: 3,
     toggles: {
         boxes: true,
         trails: true,
-        radar: true,
-        zones: true
+        zones: true,
+        minimap: true
     },
-    currentClip: 'sample.mp4',
-    alerts: [],
-    telemetryHistory: [],
-    shotClock: 24.0,
-    possessionTrack: 4,
-    lastFiredAlerts: new Set()
+    activeCallout: null,
+    highlightedTrackId: null
 };
 
-// ── Elements ─────────────────────────────────────────────────────────────────
-const demoVideo = document.getElementById('demo-video');
-const overlayCanvas = document.getElementById('overlay-canvas');
-const overlayCtx = overlayCanvas.getContext('2d');
-
-const userVideo = document.getElementById('user-video');
-const userOverlayCanvas = document.getElementById('user-overlay-canvas');
-const userOverlayCtx = userOverlayCanvas.getContext('2d');
-
-const btnPlayPause = document.getElementById('btn-play-pause');
-const btnSlowmo = document.getElementById('btn-slowmo');
-const btnStepBack = document.getElementById('btn-step-back');
-const btnStepFwd = document.getElementById('btn-step-fwd');
-const btnRestart = document.getElementById('btn-restart');
-const clipSelect = document.getElementById('clip-select');
-
-const hudFrameClock = document.getElementById('hud-frame-clock');
-const clipResPill = document.getElementById('clip-resolution-pill');
-const valInferenceMs = document.getElementById('val-inference-ms');
-const valFps = document.getElementById('val-fps');
-
-const hudPossessionHolder = document.getElementById('hud-possession-holder');
-const hudShotClockVal = document.getElementById('hud-shot-clock-val');
-const hudBallLocation = document.getElementById('hud-ball-location');
-const hudTrackedCount = document.getElementById('hud-tracked-count');
-const alertCounterBadge = document.getElementById('alert-counter-badge');
-const alertStream = document.getElementById('alert-stream');
-const btnClearFeed = document.getElementById('btn-clear-feed');
-const btnExportJsonl = document.getElementById('btn-export-jsonl');
-
-// Tab elements
-const tabDemo = document.getElementById('tab-demo');
-const tabUpload = document.getElementById('tab-upload');
-const panelDemo = document.getElementById('panel-demo');
-const panelUpload = document.getElementById('panel-upload');
-
-// Upload elements
-const uploadDropzone = document.getElementById('upload-dropzone');
-const userFileInput = document.getElementById('user-file-input');
-const btnBrowseFile = document.getElementById('btn-browse-file');
-const userVideoStage = document.getElementById('user-video-stage');
-const btnUserPlayPause = document.getElementById('btn-user-play-pause');
-const btnUserSlowmo = document.getElementById('btn-user-slowmo');
-const btnUserNew = document.getElementById('btn-user-new');
-const userClipName = document.getElementById('user-clip-name');
-const userFrameClock = document.getElementById('user-frame-clock');
-const userVideoResolution = document.getElementById('user-video-resolution');
-
-// ── Synthetic Track Anchors for Sample Clips ─────────────────────────────────
-// Keyframed tracks for sample basketball clips to sync detection boxes with video
-const sampleClipTracks = [
+// ── Preset Rule Violations ───────────────────────────────────────────────────
+const presetViolations = [
     {
-        id: 1, role: 'Guard', team: 1,
+        time: 3.2,
+        rule: 'three_second',
+        title: '3-Second Key Rule',
+        desc: 'Center #15 occupied offensive paint for 3.2s without making a continuous move to the basket.',
+        tag: 'Lane Violation',
+        colorClass: 'purple',
+        offendingTrack: 15
+    },
+    {
+        time: 6.8,
+        rule: 'out_of_bounds',
+        title: 'Sideline Out of Bounds',
+        desc: 'Wing #7 stepped across the sideline while receiving a skip pass.',
+        tag: 'Boundary',
+        colorClass: 'amber',
+        offendingTrack: 7
+    },
+    {
+        time: 10.5,
+        rule: 'charging_foul',
+        title: 'Charging Foul (Contact)',
+        desc: 'Guard #3 made illegal torso contact with Defender #9 (42% IoU box overlap, 3.4σ deceleration).',
+        tag: 'Personal Foul',
+        colorClass: 'red',
+        offendingTrack: 3
+    },
+    {
+        time: 15.0,
+        rule: 'backcourt_turnover',
+        title: 'Backcourt Turnover',
+        desc: 'Ball passed backward across midcourt into backcourt while Team White held possession.',
+        tag: 'Turnover',
+        colorClass: 'cyan',
+        offendingTrack: 30
+    },
+    {
+        time: 21.4,
+        rule: 'shot_clock_violation',
+        title: 'Shot Clock Expiration',
+        desc: '24-second possession clock expired before a field goal attempt touched the rim.',
+        tag: 'Clock Expiration',
+        colorClass: 'yellow',
+        offendingTrack: 3
+    }
+];
+
+// ── Keyframed Player Trajectories (Authentic Half-Court Set) ──────────────────
+// Team 1 (White / Offense): #3 PG, #7 Wing, #23 SG, #15 Center, #4 Power Forward
+// Team 2 (Navy / Defense): #30 PG, #9 Forward, #11 Center, #2 Guard, #5 Forward
+const courtCoords = {
+    x0: 50, y0: 40, x1: 910, y1: 500,
+    midX: 480, midY: 270,
+    paintRight: { x0: 710, y0: 185, x1: 910, y1: 355 },
+    paintLeft: { x0: 50, y0: 185, x1: 250, y1: 355 }
+};
+
+const playerPaths = [
+    // Offense (White)
+    {
+        id: 3, role: 'PG', team: 1, jersey: '3',
         keyframes: [
-            { t: 0.0, x: 0.22, y: 0.48, w: 0.08, h: 0.28 },
-            { t: 2.0, x: 0.35, y: 0.52, w: 0.09, h: 0.30 },
-            { t: 4.5, x: 0.55, y: 0.58, w: 0.11, h: 0.34 },
-            { t: 7.1, x: 0.72, y: 0.62, w: 0.12, h: 0.38 }
+            { t: 0.0, x: 420, y: 270, vx: 2.2, vy: 0.1 },
+            { t: 2.5, x: 580, y: 240, vx: 3.1, vy: -0.4 },
+            { t: 5.0, x: 670, y: 220, vx: 1.8, vy: 0.2 },
+            { t: 9.0, x: 740, y: 260, vx: 4.5, vy: 1.2 }, // Drive to basket
+            { t: 10.5, x: 765, y: 275, vx: 0.2, vy: 0.1 }, // Contact with #9
+            { t: 14.0, x: 530, y: 290, vx: -3.5, vy: 0.2 }, // Passes back
+            { t: 18.0, x: 620, y: 210, vx: 1.2, vy: -0.5 },
+            { t: 22.5, x: 700, y: 240, vx: 1.5, vy: 0.3 }
         ]
     },
     {
-        id: 4, role: 'Forward', team: 1,
+        id: 15, role: 'C', team: 1, jersey: '15',
         keyframes: [
-            { t: 0.0, x: 0.45, y: 0.42, w: 0.08, h: 0.27 },
-            { t: 2.5, x: 0.62, y: 0.46, w: 0.09, h: 0.30 },
-            { t: 5.0, x: 0.78, y: 0.52, w: 0.11, h: 0.35 },
-            { t: 7.1, x: 0.85, y: 0.58, w: 0.12, h: 0.38 }
+            { t: 0.0, x: 680, y: 250, vx: 0.5, vy: 0.2 },
+            { t: 2.0, x: 780, y: 265, vx: 0.4, vy: 0.1 }, // Enters key at t=1.0
+            { t: 4.5, x: 800, y: 270, vx: 0.2, vy: 0.0 }, // 3-second violation fires at t=3.2
+            { t: 8.0, x: 730, y: 320, vx: -1.2, vy: 0.8 }, // Clears out
+            { t: 12.0, x: 790, y: 310, vx: 1.0, vy: -0.2 },
+            { t: 17.0, x: 840, y: 260, vx: 0.8, vy: -0.6 },
+            { t: 22.5, x: 820, y: 280, vx: -0.2, vy: 0.1 }
         ]
     },
     {
-        id: 7, role: 'Wing', team: 1,
+        id: 7, role: 'Wing', team: 1, jersey: '7',
         keyframes: [
-            { t: 0.0, x: 0.15, y: 0.38, w: 0.07, h: 0.24 },
-            { t: 2.0, x: 0.28, y: 0.42, w: 0.08, h: 0.26 },
-            { t: 4.0, x: 0.42, y: 0.48, w: 0.09, h: 0.30 },
-            { t: 7.1, x: 0.58, y: 0.52, w: 0.10, h: 0.33 }
+            { t: 0.0, x: 580, y: 110, vx: 1.2, vy: 0.2 },
+            { t: 4.0, x: 720, y: 80, vx: 2.1, vy: -0.3 },
+            { t: 6.8, x: 850, y: 32, vx: 2.8, vy: -0.8 }, // Steps out of bounds at y=32 (court y0=40)
+            { t: 9.0, x: 810, y: 90, vx: -1.5, vy: 1.2 },
+            { t: 14.0, x: 750, y: 130, vx: -0.8, vy: 0.4 },
+            { t: 18.5, x: 820, y: 140, vx: 1.4, vy: 0.1 },
+            { t: 22.5, x: 780, y: 120, vx: -0.5, vy: -0.2 }
         ]
     },
     {
-        id: 9, role: 'Defender', team: 2,
+        id: 23, role: 'SG', team: 1, jersey: '23',
         keyframes: [
-            { t: 0.0, x: 0.30, y: 0.44, w: 0.08, h: 0.27 },
-            { t: 2.5, x: 0.48, y: 0.49, w: 0.09, h: 0.30 },
-            { t: 5.0, x: 0.68, y: 0.54, w: 0.11, h: 0.35 },
-            { t: 7.1, x: 0.80, y: 0.59, w: 0.12, h: 0.37 }
+            { t: 0.0, x: 560, y: 430, vx: 1.0, vy: -0.1 },
+            { t: 4.5, x: 680, y: 440, vx: 1.8, vy: 0.1 },
+            { t: 8.5, x: 760, y: 410, vx: 1.2, vy: -0.5 },
+            { t: 13.0, x: 830, y: 380, vx: 1.1, vy: -0.4 },
+            { t: 17.5, x: 790, y: 430, vx: -0.8, vy: 0.8 },
+            { t: 22.5, x: 840, y: 400, vx: 0.9, vy: -0.4 }
         ]
     },
     {
-        id: 11, role: 'Center', team: 2,
+        id: 4, role: 'PF', team: 1, jersey: '4',
         keyframes: [
-            { t: 0.0, x: 0.52, y: 0.40, w: 0.08, h: 0.26 },
-            { t: 3.0, x: 0.68, y: 0.45, w: 0.09, h: 0.29 },
-            { t: 5.5, x: 0.82, y: 0.50, w: 0.11, h: 0.34 },
-            { t: 7.1, x: 0.89, y: 0.55, w: 0.12, h: 0.37 }
+            { t: 0.0, x: 620, y: 360, vx: 1.2, vy: 0.1 },
+            { t: 5.0, x: 710, y: 340, vx: 1.4, vy: -0.2 },
+            { t: 9.5, x: 680, y: 300, vx: -0.5, vy: -0.8 },
+            { t: 14.0, x: 720, y: 240, vx: 0.8, vy: -1.0 },
+            { t: 18.0, x: 780, y: 220, vx: 1.2, vy: -0.3 },
+            { t: 22.5, x: 760, y: 270, vx: -0.4, vy: 0.8 }
+        ]
+    },
+
+    // Defense (Navy / Red Accents)
+    {
+        id: 30, role: 'PG', team: 2, jersey: '30',
+        keyframes: [
+            { t: 0.0, x: 470, y: 265, vx: 2.1, vy: 0.1 },
+            { t: 3.0, x: 620, y: 245, vx: 2.8, vy: -0.3 },
+            { t: 7.0, x: 690, y: 230, vx: 1.2, vy: -0.2 },
+            { t: 11.0, x: 710, y: 250, vx: 0.4, vy: 0.3 },
+            { t: 15.0, x: 440, y: 270, vx: -4.2, vy: 0.1 }, // Steals/deflects past halfcourt (backcourt)
+            { t: 19.0, x: 580, y: 225, vx: 2.2, vy: -0.8 },
+            { t: 22.5, x: 660, y: 245, vx: 1.4, vy: 0.3 }
+        ]
+    },
+    {
+        id: 9, role: 'SF', team: 2, jersey: '9',
+        keyframes: [
+            { t: 0.0, x: 610, y: 135, vx: 1.0, vy: 0.2 },
+            { t: 4.5, x: 735, y: 115, vx: 1.8, vy: -0.2 },
+            { t: 8.5, x: 760, y: 210, vx: 0.8, vy: 1.8 },
+            { t: 10.5, x: 775, y: 270, vx: 0.1, vy: 0.0 }, // Plants feet, takes charge at t=10.5
+            { t: 14.0, x: 710, y: 200, vx: -1.2, vy: -1.2 },
+            { t: 18.5, x: 770, y: 165, vx: 1.0, vy: -0.4 },
+            { t: 22.5, x: 765, y: 145, vx: -0.1, vy: -0.3 }
+        ]
+    },
+    {
+        id: 11, role: 'C', team: 2, jersey: '11',
+        keyframes: [
+            { t: 0.0, x: 740, y: 260, vx: 0.4, vy: 0.1 },
+            { t: 4.0, x: 820, y: 270, vx: 0.8, vy: 0.1 },
+            { t: 8.0, x: 840, y: 285, vx: 0.3, vy: 0.2 },
+            { t: 12.0, x: 810, y: 310, vx: -0.5, vy: 0.4 },
+            { t: 17.0, x: 850, y: 275, vx: 0.6, vy: -0.5 },
+            { t: 22.5, x: 835, y: 280, vx: -0.2, vy: 0.1 }
+        ]
+    },
+    {
+        id: 2, role: 'SG', team: 2, jersey: '2',
+        keyframes: [
+            { t: 0.0, x: 600, y: 410, vx: 0.9, vy: -0.1 },
+            { t: 5.0, x: 710, y: 415, vx: 1.5, vy: 0.1 },
+            { t: 9.0, x: 780, y: 380, vx: 1.1, vy: -0.5 },
+            { t: 14.0, x: 810, y: 360, vx: 0.5, vy: -0.3 },
+            { t: 18.0, x: 775, y: 400, vx: -0.6, vy: 0.7 },
+            { t: 22.5, x: 815, y: 380, vx: 0.7, vy: -0.3 }
+        ]
+    },
+    {
+        id: 5, role: 'PF', team: 2, jersey: '5',
+        keyframes: [
+            { t: 0.0, x: 660, y: 330, vx: 1.0, vy: 0.1 },
+            { t: 5.5, x: 745, y: 310, vx: 1.2, vy: -0.2 },
+            { t: 10.0, x: 720, y: 275, vx: -0.4, vy: -0.5 },
+            { t: 14.5, x: 750, y: 225, vx: 0.5, vy: -0.8 },
+            { t: 18.5, x: 800, y: 210, vx: 0.9, vy: -0.2 },
+            { t: 22.5, x: 790, y: 250, vx: -0.2, vy: 0.6 }
         ]
     }
 ];
 
-const sampleBallKeyframes = [
-    { t: 0.0, x: 0.25, y: 0.58 },
-    { t: 1.8, x: 0.38, y: 0.62 },
-    { t: 3.2, x: 0.58, y: 0.54 },
-    { t: 5.2, x: 0.74, y: 0.62 },
-    { t: 7.1, x: 0.87, y: 0.48 }
+// Ball trajectory keyframes synced with play
+const ballKeyframes = [
+    { t: 0.0, x: 425, y: 270, holder: 3 },
+    { t: 2.5, x: 585, y: 240, holder: 3 },
+    { t: 5.0, x: 675, y: 220, holder: 3 },
+    { t: 6.0, x: 775, y: 130, holder: -1 }, // Pass toward wing
+    { t: 6.8, x: 852, y: 35, holder: 7 },  // Wing catches near sideline (OOB)
+    { t: 8.5, x: 745, y: 260, holder: 3 },  // Pass back to PG
+    { t: 10.5, x: 768, y: 278, holder: 3 }, // Drive + charge collision
+    { t: 13.5, x: 650, y: 400, holder: -1 }, // Loose ball deflection
+    { t: 15.0, x: 435, y: 272, holder: 30 }, // Over midcourt (backcourt)
+    { t: 17.5, x: 625, y: 210, holder: 3 },
+    { t: 21.4, x: 705, y: 240, holder: 3 },  // Shot clock buzzer
+    { t: 22.5, x: 705, y: 240, holder: 3 }
 ];
 
-// Predefined match referee events
-const sampleEvents = [
-    {
-        time: 1.8,
-        type: 'possession',
-        title: 'Possession Transfer',
-        desc: 'Ball proximity changed from #1 Guard to #4 Forward',
-        trackId: 4
-    },
-    {
-        time: 3.4,
-        type: 'three_second',
-        title: '3-Second Paint Warning',
-        desc: 'Offensive player entered the restricted key area (2.1s elapsed)',
-        trackId: 4
-    },
-    {
-        time: 5.1,
-        type: 'contact',
-        title: 'Potential Contact / Foul',
-        desc: 'Bounding box overlap detected with #9 Defender (2.4σ acceleration spike)',
-        trackId: 4
-    },
-    {
-        time: 6.2,
-        type: 'boundary',
-        title: 'Sideline Boundary Check',
-        desc: '#7 Wing movement within 4% margin of left sideline',
-        trackId: 7
-    }
-];
-
-// Track history trails
-const trackTrails = new Map();
+// Track trails history
+const trailsMap = new Map();
 let ballTrail = [];
 
-// ── Initialization ───────────────────────────────────────────────────────────
+// ── DOM Elements ─────────────────────────────────────────────────────────────
+const canvas = document.getElementById('tracking-canvas');
+const ctx = canvas.getContext('2d');
+
+const hudClock = document.getElementById('hud-clock');
+const hudFpsPill = document.getElementById('hud-fps-pill');
+const violationCallout = document.getElementById('violation-callout');
+const calloutType = document.getElementById('callout-type');
+const calloutTitle = document.getElementById('callout-title');
+const calloutDesc = document.getElementById('callout-desc');
+
+const timelineProgress = document.getElementById('timeline-progress');
+const timelineHandle = document.getElementById('timeline-handle');
+const timelineWrapper = document.getElementById('timeline-track-wrapper');
+
+const btnSimPlay = document.getElementById('btn-sim-play');
+const btnSimSlowmo = document.getElementById('btn-sim-slowmo');
+const btnSimPrevViolation = document.getElementById('btn-sim-prev-violation');
+const btnSimNextViolation = document.getElementById('btn-sim-next-violation');
+const btnSimRestart = document.getElementById('btn-sim-restart');
+const jumpSelect = document.getElementById('jump-select');
+
+const statPossession = document.getElementById('stat-possession');
+const statShotClock = document.getElementById('stat-shotclock');
+const statBallZone = document.getElementById('stat-ballzone');
+const statPlayers = document.getElementById('stat-players');
+const decisionList = document.getElementById('decision-list');
+const btnResetLog = document.getElementById('btn-reset-log');
+const btnDownloadTelemetry = document.getElementById('btn-download-telemetry');
+
+// Mode Tab Elements
+const tabSim = document.getElementById('tab-sim');
+const tabUpload = document.getElementById('tab-upload');
+const viewSim = document.getElementById('view-sim');
+const viewUpload = document.getElementById('view-upload');
+
+// Upload View Elements
+const videoDropzone = document.getElementById('video-dropzone');
+const clipFileInput = document.getElementById('clip-file-input');
+const btnSelectFile = document.getElementById('btn-select-file');
+const uploadPlayerContainer = document.getElementById('upload-player-container');
+const uploadedVideo = document.getElementById('uploaded-video');
+const uploadedCanvas = document.getElementById('uploaded-canvas');
+const uploadedCtx = uploadedCanvas.getContext('2d');
+const btnUploadPlay = document.getElementById('btn-upload-play');
+const btnUploadSlowmo = document.getElementById('btn-upload-slowmo');
+const btnUploadNew = document.getElementById('btn-upload-new');
+const uploadFileTag = document.getElementById('upload-file-tag');
+const uploadClock = document.getElementById('upload-clock');
+const uploadMetaInfo = document.getElementById('upload-meta-info');
+
+// ── App Startup ──────────────────────────────────────────────────────────────
 function init() {
-    setupEventListeners();
-    setupToggleListeners();
-    setupDropzone();
-    
-    // Auto-start sample playback
-    demoVideo.play().then(() => {
-        state.isPlaying = true;
-        btnPlayPause.textContent = 'Pause';
-        btnPlayPause.classList.add('primary');
-    }).catch(() => {
-        state.isPlaying = false;
-        btnPlayPause.textContent = 'Play';
-    });
+    setupControls();
+    populateDecisionFeed();
+    setupTimelineEvents();
+    setupUploadHandlers();
+    setupLayerToggles();
 
     requestAnimationFrame(renderLoop);
 }
 
-// ── Event Handlers ───────────────────────────────────────────────────────────
-function setupEventListeners() {
-    // Tab switching
-    tabDemo.addEventListener('click', () => switchTab('demo'));
-    tabUpload.addEventListener('click', () => switchTab('upload'));
+// ── Controls & Event Listeners ───────────────────────────────────────────────
+function setupControls() {
+    tabSim.addEventListener('click', () => setMode('sim'));
+    tabUpload.addEventListener('click', () => setMode('upload'));
 
-    // Playback Controls
-    btnPlayPause.addEventListener('click', togglePlayPause);
-    btnSlowmo.addEventListener('click', toggleSlowmo);
-    btnStepBack.addEventListener('click', () => stepFrame(-1));
-    btnStepFwd.addEventListener('click', () => stepFrame(1));
-    btnRestart.addEventListener('click', restartPlayback);
-    clipSelect.addEventListener('change', (e) => changeClip(e.target.value));
+    btnSimPlay.addEventListener('click', togglePlay);
+    btnSimSlowmo.addEventListener('click', toggleSlowmo);
+    btnSimRestart.addEventListener('click', restartSimulation);
+    btnSimPrevViolation.addEventListener('click', jumpToPrevViolation);
+    btnSimNextViolation.addEventListener('click', jumpToNextViolation);
 
-    // Upload Controls
-    btnUserPlayPause.addEventListener('click', toggleUserPlayPause);
-    btnUserSlowmo.addEventListener('click', toggleUserSlowmo);
-    btnUserNew.addEventListener('click', resetUserUpload);
+    jumpSelect.addEventListener('change', (e) => {
+        if (e.target.value !== 'none') {
+            seekToTime(parseFloat(e.target.value));
+        }
+    });
 
-    btnClearFeed.addEventListener('click', clearFeed);
-    btnExportJsonl.addEventListener('click', exportTelemetryJsonl);
+    btnResetLog.addEventListener('click', () => {
+        state.currentTime = 0;
+        restartSimulation();
+    });
+
+    btnDownloadTelemetry.addEventListener('click', exportTelemetryJsonl);
+
+    // Keyboard shortcuts
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' && e.target.tagName !== 'INPUT') {
+            e.preventDefault();
+            togglePlay();
+        } else if (e.code === 'ArrowRight') {
+            seekToTime(Math.min(state.duration, state.currentTime + 1.0));
+        } else if (e.code === 'ArrowLeft') {
+            seekToTime(Math.max(0, state.currentTime - 1.0));
+        }
+    });
 }
 
-function setupToggleListeners() {
-    ['boxes', 'trails', 'radar', 'zones'].forEach(key => {
+function setupLayerToggles() {
+    ['boxes', 'trails', 'zones', 'minimap'].forEach(key => {
         const el = document.getElementById(`toggle-${key}`);
         if (el) {
             el.addEventListener('change', (e) => {
@@ -216,430 +332,567 @@ function setupToggleListeners() {
     });
 }
 
-function switchTab(mode) {
+function setMode(mode) {
     state.mode = mode;
-    tabDemo.classList.toggle('active', mode === 'demo');
+    tabSim.classList.toggle('active', mode === 'sim');
     tabUpload.classList.toggle('active', mode === 'upload');
-    panelDemo.classList.toggle('active', mode === 'demo');
-    panelUpload.classList.toggle('active', mode === 'upload');
+    viewSim.classList.toggle('active', mode === 'sim');
+    viewUpload.classList.toggle('active', mode === 'upload');
 
-    if (mode === 'demo') {
-        if (!demoVideo.paused) demoVideo.play();
+    if (mode === 'sim') {
+        state.isPlaying = true;
+        btnSimPlay.textContent = 'Pause';
+        btnSimPlay.classList.add('primary');
     } else {
-        demoVideo.pause();
+        state.isPlaying = false;
+        if (!uploadedVideo.paused) uploadedVideo.pause();
     }
 }
 
-function togglePlayPause() {
-    if (demoVideo.paused) {
-        demoVideo.play();
-        state.isPlaying = true;
-        btnPlayPause.textContent = 'Pause';
-    } else {
-        demoVideo.pause();
-        state.isPlaying = false;
-        btnPlayPause.textContent = 'Play';
-    }
+function togglePlay() {
+    state.isPlaying = !state.isPlaying;
+    btnSimPlay.textContent = state.isPlaying ? 'Pause' : 'Play';
+    btnSimPlay.classList.toggle('primary', state.isPlaying);
 }
 
 function toggleSlowmo() {
     state.isSlowMo = !state.isSlowMo;
-    demoVideo.playbackRate = state.isSlowMo ? 0.5 : 1.0;
-    btnSlowmo.textContent = state.isSlowMo ? '1.0x Normal' : '0.5x Slow-Mo';
-    btnSlowmo.classList.toggle('primary', state.isSlowMo);
+    btnSimSlowmo.textContent = state.isSlowMo ? '1.0x Normal' : '0.5x Slow-Mo';
+    btnSimSlowmo.classList.toggle('primary', state.isSlowMo);
 }
 
-function stepFrame(direction) {
-    demoVideo.pause();
-    state.isPlaying = false;
-    btnPlayPause.textContent = 'Play';
-    demoVideo.currentTime = Math.max(0, Math.min(demoVideo.duration, demoVideo.currentTime + (direction * 0.033)));
-}
-
-function restartPlayback() {
-    demoVideo.currentTime = 0;
-    demoVideo.play();
+function restartSimulation() {
+    state.currentTime = 0;
     state.isPlaying = true;
-    btnPlayPause.textContent = 'Pause';
-    state.lastFiredAlerts.clear();
     state.shotClock = 24.0;
-}
-
-function changeClip(filename) {
-    state.currentClip = filename;
-    demoVideo.src = filename;
-    demoVideo.load();
-    restartPlayback();
-    trackTrails.clear();
+    state.activeCallout = null;
+    state.highlightedTrackId = null;
+    trailsMap.clear();
     ballTrail = [];
+    btnSimPlay.textContent = 'Pause';
+    btnSimPlay.classList.add('primary');
 }
 
-// ── Interpolation Helper ─────────────────────────────────────────────────────
-function interpolate(keyframes, t) {
-    if (!keyframes || keyframes.length === 0) return null;
-    if (t <= keyframes[0].t) return keyframes[0];
-    if (t >= keyframes[keyframes.length - 1].t) return keyframes[keyframes.length - 1];
+function seekToTime(t) {
+    state.currentTime = Math.max(0, Math.min(state.duration, t));
+    // Find if a violation happens near this time
+    const v = presetViolations.find(item => Math.abs(item.time - state.currentTime) < 0.6);
+    if (v) {
+        state.activeCallout = v;
+        state.highlightedTrackId = v.offendingTrack;
+    } else {
+        state.activeCallout = null;
+        state.highlightedTrackId = null;
+    }
+}
 
-    for (let i = 0; i < keyframes.length - 1; i++) {
-        const k0 = keyframes[i];
-        const k1 = keyframes[i + 1];
+function jumpToPrevViolation() {
+    const prev = [...presetViolations].reverse().find(v => v.time < state.currentTime - 0.5);
+    if (prev) seekToTime(prev.time);
+    else seekToTime(presetViolations[presetViolations.length - 1].time);
+}
+
+function jumpToNextViolation() {
+    const next = presetViolations.find(v => v.time > state.currentTime + 0.5);
+    if (next) seekToTime(next.time);
+    else seekToTime(presetViolations[0].time);
+}
+
+// ── Timeline Scrubber ────────────────────────────────────────────────────────
+function setupTimelineEvents() {
+    timelineWrapper.addEventListener('click', (e) => {
+        const rect = timelineWrapper.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        seekToTime(ratio * state.duration);
+    });
+
+    // Bookmark Pin Clicks
+    document.querySelectorAll('.event-marker').forEach(marker => {
+        marker.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const time = parseFloat(marker.dataset.time);
+            seekToTime(time);
+        });
+    });
+}
+
+// ── Decision Feed Population ─────────────────────────────────────────────────
+function populateDecisionFeed() {
+    decisionList.innerHTML = '';
+    presetViolations.forEach(v => {
+        const card = document.createElement('div');
+        card.className = `decision-card ${v.colorClass}`;
+        card.innerHTML = `
+            <div class="card-top">
+                <span class="card-rule">${v.title}</span>
+                <span class="card-timestamp">${v.time.toFixed(1)}s</span>
+            </div>
+            <p class="card-detail">${v.desc}</p>
+            <div class="card-bottom">
+                <span class="card-tag">${v.tag}</span>
+                <span class="card-jump-link">Jump to Play ➔</span>
+            </div>
+        `;
+
+        card.addEventListener('click', () => {
+            seekToTime(v.time);
+            // Highlight active card
+            document.querySelectorAll('.decision-card').forEach(c => c.classList.remove('active'));
+            card.classList.add('active');
+        });
+
+        decisionList.appendChild(card);
+    });
+}
+
+// ── Interpolation Utilities ──────────────────────────────────────────────────
+function getPlayerPosition(player, t) {
+    const kfs = player.keyframes;
+    if (t <= kfs[0].t) return kfs[0];
+    if (t >= kfs[kfs.length - 1].t) return kfs[kfs.length - 1];
+
+    for (let i = 0; i < kfs.length - 1; i++) {
+        const k0 = kfs[i];
+        const k1 = kfs[i + 1];
         if (t >= k0.t && t <= k1.t) {
             const factor = (t - k0.t) / (k1.t - k0.t);
-            const res = {
-                x: k0.x + (k1.x - k0.x) * factor,
-                y: k0.y + (k1.y - k0.y) * factor
+            // Smooth hermite/cosine interpolation
+            const smooth = (1 - Math.cos(factor * Math.PI)) / 2;
+            return {
+                x: k0.x + (k1.x - k0.x) * smooth,
+                y: k0.y + (k1.y - k0.y) * smooth,
+                vx: k0.vx + (k1.vx - k0.vx) * factor,
+                vy: k0.vy + (k1.vy - k0.vy) * factor
             };
-            if (k0.w !== undefined) res.w = k0.w + (k1.w - k0.w) * factor;
-            if (k0.h !== undefined) res.h = k0.h + (k1.h - k0.h) * factor;
-            return res;
         }
     }
-    return keyframes[0];
+    return kfs[0];
 }
 
-// ── Render Loop ──────────────────────────────────────────────────────────────
-let lastFrameTime = performance.now();
-let frameCounter = 0;
+function getBallPosition(t) {
+    if (t <= ballKeyframes[0].t) return ballKeyframes[0];
+    if (t >= ballKeyframes[ballKeyframes.length - 1].t) return ballKeyframes[ballKeyframes.length - 1];
+
+    for (let i = 0; i < ballKeyframes.length - 1; i++) {
+        const k0 = ballKeyframes[i];
+        const k1 = ballKeyframes[i + 1];
+        if (t >= k0.t && t <= k1.t) {
+            const factor = (t - k0.t) / (k1.t - k0.t);
+            const smooth = (1 - Math.cos(factor * Math.PI)) / 2;
+            return {
+                x: k0.x + (k1.x - k0.x) * smooth,
+                y: k0.y + (k1.y - k0.y) * smooth,
+                holder: k0.holder
+            };
+        }
+    }
+    return ballKeyframes[0];
+}
+
+// ── Main Render Loop ─────────────────────────────────────────────────────────
+let lastFrameTimestamp = performance.now();
 
 function renderLoop(now) {
-    const dt = now - lastFrameTime;
-    lastFrameTime = now;
+    const deltaMs = now - lastFrameTimestamp;
+    lastFrameTimestamp = now;
 
-    if (state.mode === 'demo') {
-        renderDemoFrame();
-    } else if (state.mode === 'upload' && !userVideo.paused) {
-        renderUserFrame();
-    }
-
-    // Update FPS indicator smoothly
-    if (frameCounter++ % 15 === 0) {
-        const calculatedFps = Math.min(60, Math.round(1000 / Math.max(dt, 16)));
-        valFps.textContent = calculatedFps.toFixed(1);
-        valInferenceMs.textContent = (11.5 + Math.sin(now * 0.002) * 2.2).toFixed(1) + ' ms';
+    if (state.mode === 'sim') {
+        if (state.isPlaying) {
+            const speed = state.isSlowMo ? 0.5 : 1.0;
+            state.currentTime += (deltaMs / 1000) * speed;
+            if (state.currentTime >= state.duration) {
+                state.currentTime = 0; // Loop possession
+            }
+        }
+        renderSimulation();
+    } else if (state.mode === 'upload' && !uploadedVideo.paused) {
+        renderUploadedVideoOverlay();
     }
 
     requestAnimationFrame(renderLoop);
 }
 
-// ── Render Demo Frame ────────────────────────────────────────────────────────
-function renderDemoFrame() {
-    const width = overlayCanvas.parentElement.clientWidth;
-    const height = overlayCanvas.parentElement.clientHeight;
+// ── Simulation Rendering ─────────────────────────────────────────────────────
+function renderSimulation() {
+    const W = canvas.width;
+    const H = canvas.height;
 
-    if (overlayCanvas.width !== width || overlayCanvas.height !== height) {
-        overlayCanvas.width = width;
-        overlayCanvas.height = height;
-    }
+    ctx.clearRect(0, 0, W, H);
 
-    overlayCtx.clearRect(0, 0, width, height);
+    // 1. Draw Hardwood Court & Line Markings
+    drawHardwoodCourt(ctx, W, H);
 
-    const currentTime = demoVideo.currentTime || 0;
-    const duration = demoVideo.duration || 7.1;
-
-    // Update Frame Clock
-    const mins = Math.floor(currentTime / 60);
-    const secs = Math.floor(currentTime % 60);
-    const ms = Math.floor((currentTime % 1) * 100);
-    hudFrameClock.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(ms).padStart(2, '0')}`;
-
-    // Update Shot Clock
-    state.shotClock = Math.max(0, 24.0 - ((currentTime * 1.5) % 24.0));
-    hudShotClockVal.textContent = state.shotClock.toFixed(1) + 's';
-
-    // 1. Draw Court Zones
-    if (state.toggles.zones) {
-        drawCourtZones(overlayCtx, width, height);
-    }
-
-    // 2. Compute Track Coordinates
-    const currentTracks = [];
-    sampleClipTracks.forEach(track => {
-        const pos = interpolate(track.keyframes, currentTime);
-        if (pos) {
-            const screenX = pos.x * width;
-            const screenY = pos.y * height;
-            const screenW = pos.w * width;
-            const screenH = pos.h * height;
-
-            currentTracks.push({
-                id: track.id,
-                role: track.role,
-                team: track.team,
-                x: screenX,
-                y: screenY,
-                w: screenW,
-                h: screenH
-            });
-
-            // Store Trail
-            if (!trackTrails.has(track.id)) trackTrails.set(track.id, []);
-            const trail = trackTrails.get(track.id);
-            trail.push({ x: screenX, y: screenY + screenH * 0.9 });
-            if (trail.length > 25) trail.shift();
-        }
+    // 2. Compute Active Entities
+    const currentPlayers = playerPaths.map(p => {
+        const pos = getPlayerPosition(p, state.currentTime);
+        return {
+            id: p.id,
+            role: p.role,
+            team: p.team,
+            jersey: p.jersey,
+            x: pos.x,
+            y: pos.y,
+            vx: pos.vx,
+            vy: pos.vy
+        };
     });
 
-    // 3. Compute Ball Position
-    const ballPos = interpolate(sampleBallKeyframes, currentTime);
-    let screenBall = null;
-    if (ballPos) {
-        screenBall = { x: ballPos.x * width, y: ballPos.y * height };
-        ballTrail.push(screenBall);
-        if (ballTrail.length > 18) ballTrail.shift();
-    }
+    const ballPos = getBallPosition(state.currentTime);
 
-    // 4. Draw Trails
+    // Update trails
+    currentPlayers.forEach(p => {
+        if (!trailsMap.has(p.id)) trailsMap.set(p.id, []);
+        const trail = trailsMap.get(p.id);
+        trail.push({ x: p.x, y: p.y });
+        if (trail.length > 20) trail.shift();
+    });
+
+    ballTrail.push({ x: ballPos.x, y: ballPos.y });
+    if (ballTrail.length > 15) ballTrail.shift();
+
+    // 3. Draw Player Trails
     if (state.toggles.trails) {
-        drawTrails(overlayCtx);
+        drawEntityTrails(ctx);
     }
 
-    // 5. Draw Detection Boxes
-    if (state.toggles.boxes) {
-        drawDetections(overlayCtx, currentTracks, screenBall);
+    // 4. Draw Players (Tokens + Bounding Boxes)
+    drawPlayersAndBoxes(ctx, currentPlayers);
+
+    // 5. Draw Basketball & Possession Indicator
+    drawBasketball(ctx, ballPos);
+
+    // 6. Draw 2D Tactical Minimap (Radar)
+    if (state.toggles.minimap) {
+        drawTacticalRadar(ctx, W, H, currentPlayers, ballPos);
     }
 
-    // 6. Draw 2D Court Radar (Minimap)
-    if (state.toggles.radar) {
-        drawCourtRadar(overlayCtx, width, height, currentTracks, screenBall);
-    }
+    // 7. Update UI HUD & Scrubber Bar
+    updateHUDAndTimeline(currentPlayers, ballPos);
 
-    // 7. Check for Referee Alert Triggers
-    checkAlertEvents(currentTime);
-
-    // Update HUD Stats
-    hudTrackedCount.textContent = `${currentTracks.length} players`;
-    if (screenBall) {
-        hudBallLocation.textContent = screenBall.x > width * 0.5 ? 'Frontcourt (Right)' : 'Backcourt (Left)';
-    }
+    // 8. Handle Violation Detection & Alerts
+    evaluateActiveViolations();
 }
 
-// ── Canvas Drawing Subroutines ────────────────────────────────────────────────
-function drawCourtZones(ctx, w, h) {
-    // Translucent Key / Paint Zone on Right
-    ctx.fillStyle = 'rgba(139, 92, 246, 0.12)';
-    ctx.strokeStyle = 'rgba(139, 92, 246, 0.4)';
+// ── Court Geometry Drawing ───────────────────────────────────────────────────
+function drawHardwoodCourt(ctx, w, h) {
+    // Court Floor
+    ctx.fillStyle = '#0a0c13';
+    ctx.fillRect(0, 0, w, h);
+
+    // Court Boundary Envelope
+    const c = courtCoords;
+    ctx.fillStyle = '#0f121d';
+    ctx.fillRect(c.x0, c.y0, c.x1 - c.x0, c.y1 - c.y0);
+
+    // Subtle Plank Grain Lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.015)';
+    ctx.lineWidth = 1;
+    for (let y = c.y0; y < c.y1; y += 16) {
+        ctx.beginPath();
+        ctx.moveTo(c.x0, y);
+        ctx.lineTo(c.x1, y);
+        ctx.stroke();
+    }
+
+    // Key / Paint Zones
+    if (state.toggles.zones) {
+        // Right Key
+        const rk = c.paintRight;
+        const is3SecActive = state.activeCallout && state.activeCallout.rule === 'three_second';
+        ctx.fillStyle = is3SecActive ? 'rgba(139, 92, 246, 0.28)' : 'rgba(139, 92, 246, 0.10)';
+        ctx.fillRect(rk.x0, rk.y0, rk.x1 - rk.x0, rk.y1 - rk.y0);
+        ctx.strokeStyle = is3SecActive ? 'rgba(139, 92, 246, 0.8)' : 'rgba(139, 92, 246, 0.35)';
+        ctx.lineWidth = is3SecActive ? 2.5 : 1.5;
+        ctx.strokeRect(rk.x0, rk.y0, rk.x1 - rk.x0, rk.y1 - rk.y0);
+
+        // Left Key
+        const lk = c.paintLeft;
+        ctx.fillStyle = 'rgba(139, 92, 246, 0.10)';
+        ctx.fillRect(lk.x0, lk.y0, lk.x1 - lk.x0, lk.y1 - lk.y0);
+        ctx.strokeStyle = 'rgba(139, 92, 246, 0.35)';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(lk.x0, lk.y0, lk.x1 - lk.x0, lk.y1 - lk.y0);
+    }
+
+    // Main Lines
+    ctx.strokeStyle = 'rgba(0, 212, 255, 0.45)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(c.x0, c.y0, c.x1 - c.x0, c.y1 - c.y0);
+
+    // Half Court Line
+    const isBackcourtActive = state.activeCallout && state.activeCallout.rule === 'backcourt_turnover';
+    ctx.strokeStyle = isBackcourtActive ? '#00d4ff' : 'rgba(255, 255, 255, 0.35)';
+    ctx.lineWidth = isBackcourtActive ? 3.0 : 1.5;
+    ctx.beginPath();
+    ctx.moveTo(c.midX, c.y0);
+    ctx.lineTo(c.midX, c.y1);
+    ctx.stroke();
+
+    // Center Circle
+    ctx.strokeStyle = 'rgba(0, 212, 255, 0.35)';
     ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(c.midX, c.midY, 55, 0, Math.PI * 2);
+    ctx.stroke();
 
-    const paintX = w * 0.72;
-    const paintY = h * 0.35;
-    const paintW = w * 0.24;
-    const paintH = h * 0.45;
-
-    ctx.fillRect(paintX, paintY, paintW, paintH);
-    ctx.strokeRect(paintX, paintY, paintW, paintH);
-
-    // Label Paint
-    ctx.fillStyle = 'rgba(139, 92, 246, 0.8)';
-    ctx.font = '500 10px Inter, sans-serif';
-    ctx.fillText('PAINT / KEY', paintX + 8, paintY + 16);
-
-    // Court Sideline Boundary (Safety Envelope)
+    // 3-Point Arcs (Right side)
     ctx.strokeStyle = 'rgba(0, 212, 255, 0.3)';
-    ctx.setLineDash([4, 4]);
-    ctx.strokeRect(w * 0.05, h * 0.20, w * 0.90, h * 0.70);
-    ctx.setLineDash([]);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(c.x1 - 20, c.midY, 190, Math.PI * 0.58, Math.PI * 1.42);
+    ctx.stroke();
+
+    // 3-Point Arcs (Left side)
+    ctx.beginPath();
+    ctx.arc(c.x0 + 20, c.midY, 190, -Math.PI * 0.42, Math.PI * 0.42);
+    ctx.stroke();
+
+    // Baskets & Backboards
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(c.x1 - 20, c.midY - 24); ctx.lineTo(c.x1 - 20, c.midY + 24);
+    ctx.moveTo(c.x0 + 20, c.midY - 24); ctx.lineTo(c.x0 + 20, c.midY + 24);
+    ctx.stroke();
+
+    ctx.fillStyle = '#fb923c';
+    ctx.beginPath();
+    ctx.arc(c.x1 - 32, c.midY, 8, 0, Math.PI * 2);
+    ctx.arc(c.x0 + 32, c.midY, 8, 0, Math.PI * 2);
+    ctx.fill();
 }
 
-function drawTrails(ctx) {
-    // Player Trails
-    trackTrails.forEach((trail, id) => {
+function drawEntityTrails(ctx) {
+    trailsMap.forEach((trail, id) => {
         if (trail.length < 2) return;
         ctx.beginPath();
         ctx.moveTo(trail[0].x, trail[0].y);
         for (let i = 1; i < trail.length; i++) {
             ctx.lineTo(trail[i].x, trail[i].y);
         }
-        ctx.strokeStyle = id < 8 ? 'rgba(0, 212, 255, 0.25)' : 'rgba(239, 68, 68, 0.25)';
+        const isOffense = id <= 23;
+        ctx.strokeStyle = isOffense ? 'rgba(0, 212, 255, 0.22)' : 'rgba(239, 68, 68, 0.20)';
         ctx.lineWidth = 2;
         ctx.stroke();
     });
 
-    // Ball Trail
     if (ballTrail.length > 2) {
         ctx.beginPath();
         ctx.moveTo(ballTrail[0].x, ballTrail[0].y);
         for (let i = 1; i < ballTrail.length; i++) {
             ctx.lineTo(ballTrail[i].x, ballTrail[i].y);
         }
-        ctx.strokeStyle = 'rgba(251, 146, 60, 0.45)';
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(251, 146, 60, 0.35)';
+        ctx.lineWidth = 2.5;
         ctx.stroke();
     }
 }
 
-function drawDetections(ctx, tracks, ball) {
-    tracks.forEach(t => {
-        const isOffense = t.team === 1;
-        const color = isOffense ? '#00d4ff' : '#ef4444';
+function drawPlayersAndBoxes(ctx, players) {
+    players.forEach(p => {
+        const isOffense = p.team === 1;
+        const isOffending = state.highlightedTrackId === p.id;
 
-        // Bounding Box
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.8;
-        ctx.strokeRect(t.x - t.w / 2, t.y - t.h / 2, t.w, t.h);
+        let baseColor = isOffense ? '#00d4ff' : '#ef4444';
+        if (isOffending) baseColor = '#f59e0b'; // Amber highlight for rule violator
 
-        // Header Label Pill
-        const label = `#${t.id} ${t.role}`;
-        ctx.font = '600 10px "JetBrains Mono", monospace';
-        const textMetrics = ctx.measureText(label);
-        const pillW = textMetrics.width + 10;
-        const pillH = 16;
-        const pillX = t.x - t.w / 2;
-        const pillY = t.y - t.h / 2 - pillH;
+        // Bounding Box Dimensions
+        const bw = 34;
+        const bh = 54;
+        const bx = p.x - bw / 2;
+        const by = p.y - bh / 2;
 
-        ctx.fillStyle = color;
-        ctx.fillRect(pillX, pillY, pillW, pillH);
+        if (state.toggles.boxes) {
+            // Box Outline
+            ctx.strokeStyle = baseColor;
+            ctx.lineWidth = isOffending ? 2.8 : 1.6;
+            ctx.strokeRect(bx, by, bw, bh);
 
-        ctx.fillStyle = '#05060a';
-        ctx.fillText(label, pillX + 5, pillY + 12);
+            // Translucent fill
+            ctx.fillStyle = isOffending ? 'rgba(245, 158, 11, 0.15)' : (isOffense ? 'rgba(0, 212, 255, 0.08)' : 'rgba(239, 68, 68, 0.08)');
+            ctx.fillRect(bx, by, bw, bh);
 
-        // Speed indicator (simulated)
-        const speed = (18.2 + Math.sin(t.id * 1.7 + demoVideo.currentTime * 3) * 4).toFixed(1);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-        ctx.font = '500 9px "JetBrains Mono", monospace';
-        ctx.fillText(`${speed} px/f`, pillX, t.y + t.h / 2 + 12);
-    });
+            // Track Label Pill
+            const label = `#${p.jersey} ${p.role}`;
+            ctx.font = '600 10px "JetBrains Mono", monospace';
+            const tw = ctx.measureText(label).width + 8;
+            ctx.fillStyle = baseColor;
+            ctx.fillRect(bx, by - 14, tw, 14);
 
-    // Draw Basketball
-    if (ball) {
-        // Glowing halo
+            ctx.fillStyle = '#05060a';
+            ctx.fillText(label, bx + 4, by - 3);
+
+            // Velocity indicator
+            const speedMph = (Math.sqrt(p.vx * p.vx + p.vy * p.vy) * 3.8 + 4.2).toFixed(1);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+            ctx.font = '500 8.5px "JetBrains Mono", monospace';
+            ctx.fillText(`${speedMph} mph`, bx, by + bh + 11);
+        }
+
+        // Circular Player Token inside Box
         ctx.beginPath();
-        ctx.arc(ball.x, ball.y, 10, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(251, 146, 60, 0.3)';
+        ctx.arc(p.x, p.y, 11, 0, Math.PI * 2);
+        ctx.fillStyle = isOffense ? '#ffffff' : '#1e293b';
         ctx.fill();
-
-        // Ball Core
-        ctx.beginPath();
-        ctx.arc(ball.x, ball.y, 5, 0, Math.PI * 2);
-        ctx.fillStyle = '#fb923c';
-        ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = baseColor;
+        ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Ball Label
-        ctx.fillStyle = '#fb923c';
-        ctx.font = '600 9px "JetBrains Mono", monospace';
-        ctx.fillText('BALL', ball.x + 8, ball.y + 3);
-    }
-}
+        // Jersey Number
+        ctx.fillStyle = isOffense ? '#0f172a' : '#ffffff';
+        ctx.font = 'bold 9px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(p.jersey, p.x, p.y);
+        ctx.textAlign = 'start';
+        ctx.textBaseline = 'alphabetic';
 
-function drawCourtRadar(ctx, w, h, tracks, ball) {
-    const radarW = 160;
-    const radarH = 95;
-    const radarX = w - radarW - 14;
-    const radarY = h - radarH - 14;
-
-    // Radar Backdrop
-    ctx.fillStyle = 'rgba(16, 18, 26, 0.85)';
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
-    ctx.lineWidth = 1;
-    ctx.fillRect(radarX, radarY, radarW, radarH);
-    ctx.strokeRect(radarX, radarY, radarW, radarH);
-
-    // Court Boundaries in Radar
-    ctx.strokeStyle = 'rgba(0, 212, 255, 0.4)';
-    ctx.strokeRect(radarX + 6, radarY + 6, radarW - 12, radarH - 12);
-
-    // Half Court Line
-    ctx.beginPath();
-    ctx.moveTo(radarX + radarW / 2, radarY + 6);
-    ctx.lineTo(radarX + radarW / 2, radarY + radarH - 6);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-    ctx.stroke();
-
-    // Center Circle
-    ctx.beginPath();
-    ctx.arc(radarX + radarW / 2, radarY + radarH / 2, 12, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Key Areas
-    ctx.fillStyle = 'rgba(139, 92, 246, 0.2)';
-    ctx.fillRect(radarX + radarW - 28, radarY + 28, 22, radarH - 56);
-
-    // Render Players in Radar
-    tracks.forEach(t => {
-        const normX = t.x / w;
-        const normY = t.y / h;
-        const dotX = radarX + 6 + normX * (radarW - 12);
-        const dotY = radarY + 6 + normY * (radarH - 12);
-
-        ctx.beginPath();
-        ctx.arc(dotX, dotY, 3, 0, Math.PI * 2);
-        ctx.fillStyle = t.team === 1 ? '#00d4ff' : '#ef4444';
-        ctx.fill();
-    });
-
-    // Render Ball in Radar
-    if (ball) {
-        const dotX = radarX + 6 + (ball.x / w) * (radarW - 12);
-        const dotY = radarY + 6 + (ball.y / h) * (radarH - 12);
-        ctx.beginPath();
-        ctx.arc(dotX, dotY, 2.5, 0, Math.PI * 2);
-        ctx.fillStyle = '#fb923c';
-        ctx.fill();
-    }
-
-    // Label
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-    ctx.font = '500 8px Inter, sans-serif';
-    ctx.fillText('2D COURT RADAR', radarX + 8, radarY + 15);
-}
-
-// ── Referee Decision Log ─────────────────────────────────────────────────────
-function checkAlertEvents(currentTime) {
-    sampleEvents.forEach(evt => {
-        if (Math.abs(currentTime - evt.time) < 0.25 && !state.lastFiredAlerts.has(evt.time)) {
-            state.lastFiredAlerts.add(evt.time);
-            pushAlert(evt);
+        // Highlighting pulse ring if involved in infraction
+        if (isOffending) {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 22 + Math.sin(performance.now() * 0.01) * 4, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(245, 158, 11, 0.6)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
         }
     });
 }
 
-function pushAlert(evt) {
-    state.alerts.unshift(evt);
-    alertCounterBadge.textContent = state.alerts.length;
+function drawBasketball(ctx, ball) {
+    // Glowing halo around ball
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, 14, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(251, 146, 60, 0.25)';
+    ctx.fill();
 
-    const card = document.createElement('div');
-    card.className = `alert-card ${evt.type}`;
-    card.innerHTML = `
-        <div class="alert-card-top">
-            <span class="alert-title">${evt.title}</span>
-            <span class="alert-timestamp">@ ${evt.time.toFixed(1)}s</span>
-        </div>
-        <p class="alert-desc">${evt.desc}</p>
-        <div class="alert-card-bottom">
-            <span class="alert-tag">${evt.type.replace('_', ' ')}</span>
-            <span class="alert-seek-hint">Jump to Frame ➔</span>
-        </div>
-    `;
+    // Ball Body
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, 6, 0, Math.PI * 2);
+    ctx.fillStyle = '#fb923c';
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
 
-    card.addEventListener('click', () => {
-        demoVideo.currentTime = Math.max(0, evt.time - 0.2);
+    // Seam lines
+    ctx.strokeStyle = '#7c2d12';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(ball.x - 5, ball.y); ctx.lineTo(ball.x + 5, ball.y);
+    ctx.stroke();
+}
+
+function drawTacticalRadar(ctx, w, h, players, ball) {
+    const rw = 160;
+    const rh = 90;
+    const rx = w - rw - 14;
+    const ry = h - rh - 14;
+
+    // Background Panel
+    ctx.fillStyle = 'rgba(10, 12, 18, 0.9)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 1;
+    ctx.fillRect(rx, ry, rw, rh);
+    ctx.strokeRect(rx, ry, rw, rh);
+
+    // Court outline in minimap
+    ctx.strokeStyle = 'rgba(0, 212, 255, 0.35)';
+    ctx.strokeRect(rx + 6, ry + 6, rw - 12, rh - 12);
+
+    // Half court line
+    ctx.beginPath();
+    ctx.moveTo(rx + rw / 2, ry + 6);
+    ctx.lineTo(rx + rw / 2, ry + rh - 6);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.stroke();
+
+    // Minimap Players
+    players.forEach(p => {
+        const normX = (p.x - courtCoords.x0) / (courtCoords.x1 - courtCoords.x0);
+        const normY = (p.y - courtCoords.y0) / (courtCoords.y1 - courtCoords.y0);
+        const px = rx + 6 + normX * (rw - 12);
+        const py = ry + 6 + normY * (rh - 12);
+
+        ctx.beginPath();
+        ctx.arc(px, py, 3, 0, Math.PI * 2);
+        ctx.fillStyle = p.team === 1 ? '#00d4ff' : '#ef4444';
+        ctx.fill();
     });
 
-    alertStream.insertBefore(card, alertStream.firstChild);
+    // Minimap Ball
+    const bNormX = (ball.x - courtCoords.x0) / (courtCoords.x1 - courtCoords.x0);
+    const bNormY = (ball.y - courtCoords.y0) / (courtCoords.y1 - courtCoords.y0);
+    ctx.beginPath();
+    ctx.arc(rx + 6 + bNormX * (rw - 12), ry + 6 + bNormY * (rh - 12), 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#fb923c';
+    ctx.fill();
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.font = '600 8px Inter, sans-serif';
+    ctx.fillText('TACTICAL RADAR', rx + 8, ry + 15);
 }
 
-function clearFeed() {
-    state.alerts = [];
-    state.lastFiredAlerts.clear();
-    alertStream.innerHTML = '';
-    alertCounterBadge.textContent = '0';
+// ── HUD & Scrubber Update ────────────────────────────────────────────────────
+function updateHUDAndTimeline(players, ball) {
+    const mins = Math.floor(state.currentTime / 60);
+    const secs = Math.floor(state.currentTime % 60);
+    const ms = Math.floor((state.currentTime % 1) * 100);
+    hudClock.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(ms).padStart(2, '0')}`;
+
+    // Update Scrubber
+    const progressPct = (state.currentTime / state.duration) * 100;
+    timelineProgress.style.width = `${progressPct}%`;
+    timelineHandle.style.left = `${progressPct}%`;
+
+    // Shot clock calculation
+    state.shotClock = Math.max(0, 24.0 - (state.currentTime % 24.0));
+    statShotClock.textContent = state.shotClock.toFixed(1) + 's';
+
+    // Ball location
+    statBallZone.textContent = ball.x > courtCoords.midX ? 'Frontcourt (Right)' : 'Backcourt (Left)';
 }
 
+// ── Violation Triggers & Callout ─────────────────────────────────────────────
+function evaluateActiveViolations() {
+    const active = presetViolations.find(v => Math.abs(state.currentTime - v.time) < 0.8);
+    if (active) {
+        state.activeCallout = active;
+        state.highlightedTrackId = active.offendingTrack;
+
+        violationCallout.style.display = 'flex';
+        calloutType.textContent = active.tag.toUpperCase();
+        calloutTitle.textContent = active.title;
+        calloutDesc.textContent = active.desc;
+
+        // Highlight matching card in feed
+        document.querySelectorAll('.decision-card').forEach((card, idx) => {
+            card.classList.toggle('active', presetViolations[idx] === active);
+        });
+    } else {
+        state.activeCallout = null;
+        state.highlightedTrackId = null;
+        violationCallout.style.display = 'none';
+        document.querySelectorAll('.decision-card').forEach(card => card.classList.remove('active'));
+    }
+}
+
+// ── Telemetry JSONL Exporter ─────────────────────────────────────────────────
 function exportTelemetryJsonl() {
     const records = [];
-    for (let f = 1; f <= 120; f++) {
-        const timeUs = Date.now() * 1000 + f * 33333;
+    const step = 0.033; // 30 FPS
+    for (let t = 0; t <= state.duration; t += step) {
+        const frameId = Math.round(t * 30);
+        const ball = getBallPosition(t);
+        const activeV = presetViolations.find(v => Math.abs(t - v.time) < 0.2);
+
         records.push(JSON.stringify({
-            frame_id: f,
-            timestamp_us: timeUs,
-            detections: 7 + (f % 3),
-            anomalies: (f === 45 || f === 92) ? 1 : 0,
-            possession_track: state.possessionTrack,
-            shot_clock: Math.max(0, 24.0 - (f * 0.1)).toFixed(1),
-            inference_ms: (12.4 + (f % 4) * 0.8).toFixed(1),
-            ipc_latency_ms: 0.12
+            frame_id: frameId,
+            timestamp_sec: parseFloat(t.toFixed(3)),
+            detections_count: 11,
+            ball_coordinates: { x: parseFloat(ball.x.toFixed(1)), y: parseFloat(ball.y.toFixed(1)) },
+            shot_clock_remaining: parseFloat(Math.max(0, 24.0 - t).toFixed(1)),
+            rule_violation: activeV ? activeV.rule : null,
+            latency_ms: parseFloat((12.1 + (frameId % 5) * 0.6).toFixed(1))
         }));
     }
 
@@ -647,127 +900,121 @@ function exportTelemetryJsonl() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `kinetic_telemetry_${Date.now()}.jsonl`;
+    a.download = `kinetic_match_telemetry_${Date.now()}.jsonl`;
     a.click();
     URL.revokeObjectURL(url);
 }
 
-// ── Upload Mode Handler ──────────────────────────────────────────────────────
-function setupDropzone() {
-    uploadDropzone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        uploadDropzone.classList.add('dragover');
+// ── Upload Mode Management ───────────────────────────────────────────────────
+function setupUploadHandlers() {
+    btnSelectFile.addEventListener('click', () => clipFileInput.click());
+    videoDropzone.addEventListener('click', (e) => {
+        if (e.target !== btnSelectFile) clipFileInput.click();
     });
 
-    uploadDropzone.addEventListener('dragleave', () => {
-        uploadDropzone.classList.remove('dragover');
+    videoDropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        videoDropzone.classList.add('dragover');
     });
 
-    uploadDropzone.addEventListener('drop', (e) => {
+    videoDropzone.addEventListener('dragleave', () => {
+        videoDropzone.classList.remove('dragover');
+    });
+
+    videoDropzone.addEventListener('drop', (e) => {
         e.preventDefault();
-        uploadDropzone.classList.remove('dragover');
+        videoDropzone.classList.remove('dragover');
         if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-            handleUserFile(e.dataTransfer.files[0]);
+            handleUploadedFile(e.dataTransfer.files[0]);
         }
     });
 
-    btnBrowseFile.addEventListener('click', () => userFileInput.click());
-    uploadDropzone.addEventListener('click', (e) => {
-        if (e.target !== btnBrowseFile) userFileInput.click();
-    });
-
-    userFileInput.addEventListener('change', (e) => {
+    clipFileInput.addEventListener('change', (e) => {
         if (e.target.files && e.target.files[0]) {
-            handleUserFile(e.target.files[0]);
+            handleUploadedFile(e.target.files[0]);
         }
+    });
+
+    btnUploadPlay.addEventListener('click', () => {
+        if (uploadedVideo.paused) {
+            uploadedVideo.play();
+            btnUploadPlay.textContent = 'Pause';
+        } else {
+            uploadedVideo.pause();
+            btnUploadPlay.textContent = 'Play';
+        }
+    });
+
+    btnUploadSlowmo.addEventListener('click', () => {
+        const isSlow = uploadedVideo.playbackRate < 1.0;
+        uploadedVideo.playbackRate = isSlow ? 1.0 : 0.5;
+        btnUploadSlowmo.textContent = isSlow ? '0.5x' : '1.0x';
+    });
+
+    btnUploadNew.addEventListener('click', () => {
+        uploadedVideo.pause();
+        uploadedVideo.src = '';
+        videoDropzone.style.display = 'flex';
+        uploadPlayerContainer.style.display = 'none';
     });
 }
 
-function handleUserFile(file) {
-    if (!file.type.startsWith('video/')) {
-        alert('Please upload a valid video file (.mp4, .webm, or .mov)');
-        return;
-    }
+function handleUploadedFile(file) {
+    uploadFileTag.textContent = file.name;
+    videoDropzone.style.display = 'none';
+    uploadPlayerContainer.style.display = 'flex';
 
-    userClipName.textContent = file.name;
-    uploadDropzone.style.display = 'none';
-    userVideoStage.style.display = 'flex';
+    const url = URL.createObjectURL(file);
+    uploadedVideo.src = url;
+    uploadedVideo.load();
 
-    const fileUrl = URL.createObjectURL(file);
-    userVideo.src = fileUrl;
-    userVideo.load();
-
-    userVideo.onloadedmetadata = () => {
-        userVideoResolution.textContent = `${userVideo.videoWidth} x ${userVideo.videoHeight}`;
-        userVideo.play().then(() => {
-            btnUserPlayPause.textContent = 'Pause';
+    uploadedVideo.onloadedmetadata = () => {
+        uploadMetaInfo.textContent = `Resolution: ${uploadedVideo.videoWidth} x ${uploadedVideo.videoHeight} (${uploadedVideo.duration.toFixed(1)}s)`;
+        uploadedVideo.play().then(() => {
+            btnUploadPlay.textContent = 'Pause';
         });
     };
 }
 
-function toggleUserPlayPause() {
-    if (userVideo.paused) {
-        userVideo.play();
-        btnUserPlayPause.textContent = 'Pause';
-    } else {
-        userVideo.pause();
-        btnUserPlayPause.textContent = 'Play';
+function renderUploadedVideoOverlay() {
+    const W = uploadedCanvas.parentElement.clientWidth;
+    const H = uploadedCanvas.parentElement.clientHeight;
+
+    if (uploadedCanvas.width !== W || uploadedCanvas.height !== H) {
+        uploadedCanvas.width = W;
+        uploadedCanvas.height = H;
+    }
+
+    uploadedCtx.clearRect(0, 0, W, H);
+
+    const t = uploadedVideo.currentTime || 0;
+    const mins = Math.floor(t / 60);
+    const secs = Math.floor(t % 60);
+    const ms = Math.floor((t % 1) * 100);
+    uploadClock.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(ms).padStart(2, '0')}`;
+
+    // Court Perimeter
+    uploadedCtx.strokeStyle = 'rgba(0, 212, 255, 0.4)';
+    uploadedCtx.lineWidth = 2;
+    uploadedCtx.strokeRect(W * 0.08, H * 0.15, W * 0.84, H * 0.70);
+
+    // Client-side Subject Tracking Box Emulation
+    for (let i = 0; i < 4; i++) {
+        const bx = W * 0.15 + (W * 0.7) * ((Math.sin(t * 0.7 + i * 1.9) + 1) / 2);
+        const by = H * 0.25 + (H * 0.5) * ((Math.cos(t * 0.5 + i * 1.5) + 1) / 2);
+        const bw = W * 0.08;
+        const bh = H * 0.25;
+
+        uploadedCtx.strokeStyle = i === 0 ? '#fb923c' : '#00d4ff';
+        uploadedCtx.lineWidth = 1.8;
+        uploadedCtx.strokeRect(bx - bw / 2, by - bh / 2, bw, bh);
+
+        const label = i === 0 ? 'SPORTS BALL' : `PLAYER #${i + 1}`;
+        uploadedCtx.fillStyle = i === 0 ? '#fb923c' : '#00d4ff';
+        uploadedCtx.font = '600 10px "JetBrains Mono", monospace';
+        uploadedCtx.fillText(label, bx - bw / 2, by - bh / 2 - 4);
     }
 }
 
-function toggleUserSlowmo() {
-    const isSlow = userVideo.playbackRate < 1.0;
-    userVideo.playbackRate = isSlow ? 1.0 : 0.5;
-    btnUserSlowmo.textContent = isSlow ? '0.5x' : '1.0x';
-}
-
-function resetUserUpload() {
-    userVideo.pause();
-    userVideo.src = '';
-    uploadDropzone.style.display = 'flex';
-    userVideoStage.style.display = 'none';
-}
-
-function renderUserFrame() {
-    const width = userOverlayCanvas.parentElement.clientWidth;
-    const height = userOverlayCanvas.parentElement.clientHeight;
-
-    if (userOverlayCanvas.width !== width || userOverlayCanvas.height !== height) {
-        userOverlayCanvas.width = width;
-        userOverlayCanvas.height = height;
-    }
-
-    userOverlayCtx.clearRect(0, 0, width, height);
-
-    const currentTime = userVideo.currentTime || 0;
-    const mins = Math.floor(currentTime / 60);
-    const secs = Math.floor(currentTime % 60);
-    const ms = Math.floor((currentTime % 1) * 100);
-    userFrameClock.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(ms).padStart(2, '0')}`;
-
-    // Court Grid Overlay for Custom Clip
-    userOverlayCtx.strokeStyle = 'rgba(0, 212, 255, 0.4)';
-    userOverlayCtx.lineWidth = 2;
-    userOverlayCtx.strokeRect(width * 0.08, height * 0.15, width * 0.84, height * 0.70);
-
-    // Draw Simulated Dynamic Tracker on User Video
-    const t = currentTime;
-    for (let i = 0; i < 3; i++) {
-        const bx = width * 0.2 + (width * 0.6) * ((Math.sin(t * 0.8 + i * 2.2) + 1) / 2);
-        const by = height * 0.3 + (height * 0.4) * ((Math.cos(t * 0.6 + i * 1.8) + 1) / 2);
-        const bw = width * 0.08;
-        const bh = height * 0.26;
-
-        userOverlayCtx.strokeStyle = i === 0 ? '#fb923c' : '#00d4ff';
-        userOverlayCtx.lineWidth = 1.6;
-        userOverlayCtx.strokeRect(bx - bw / 2, by - bh / 2, bw, bh);
-
-        const label = i === 0 ? 'BALL' : `TRACK #${i}`;
-        userOverlayCtx.fillStyle = i === 0 ? '#fb923c' : '#00d4ff';
-        userOverlayCtx.font = '600 10px "JetBrains Mono", monospace';
-        userOverlayCtx.fillText(label, bx - bw / 2, by - bh / 2 - 4);
-    }
-}
-
-// ── Startup ──────────────────────────────────────────────────────────────────
+// ── Initialize on DOM Load ───────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', init);

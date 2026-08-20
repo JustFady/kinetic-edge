@@ -3,164 +3,202 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Kinetic-Edge is an offline computer vision pipeline for real-time basketball player and ball tracking, boundary enforcement, and referee assistance.">
-    <title>Kinetic-Edge — Video AI Referee Assistant</title>
+    <meta name="description" content="Kinetic-Edge is an edge computer vision pipeline for real-time basketball tracking, rule enforcement, and referee decision support.">
+    <title>Kinetic-Edge — Basketball Computer Vision & Referee Analytics</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <header class="navbar">
-        <div class="nav-brand">
-            <span class="brand-badge">KE</span>
-            <div class="brand-text">
-                <span class="brand-title">Kinetic-Edge</span>
-                <span class="brand-desc">Local Computer Vision Pipeline</span>
+    <header class="app-header">
+        <div class="brand">
+            <div class="brand-logo">KE</div>
+            <div class="brand-info">
+                <span class="brand-name">Kinetic-Edge</span>
+                <span class="brand-tag">Basketball Tracking & Rule Evaluation Pipeline</span>
             </div>
         </div>
-        <div class="nav-links">
-            <a href="https://pypi.org/project/kinetic-edge/" class="nav-btn pypi" target="_blank" rel="noopener">pip install kinetic-edge</a>
-            <a href="https://github.com/JustFady/kinetic-edge/releases/tag/v1.0.0" class="nav-btn" target="_blank" rel="noopener">Download v1.0.0</a>
-            <a href="https://github.com/JustFady/kinetic-edge" class="nav-btn github" target="_blank" rel="noopener">GitHub</a>
+        <div class="header-actions">
+            <a href="https://pypi.org/project/kinetic-edge/" class="btn-link pypi" target="_blank" rel="noopener">pip install kinetic-edge</a>
+            <a href="https://github.com/JustFady/kinetic-edge/releases/tag/v1.0.0" class="btn-link" target="_blank" rel="noopener">Download Desktop App</a>
+            <a href="https://github.com/JustFady/kinetic-edge" class="btn-link github" target="_blank" rel="noopener">GitHub</a>
         </div>
     </header>
 
-    <div class="app-layout">
-        <section class="viewport-pane">
-            <div class="tab-strip">
-                <div class="tabs-left">
-                    <button class="tab-btn active" id="tab-demo" data-target="demo">Sample Match Analysis</button>
-                    <button class="tab-btn" id="tab-upload" data-target="upload">Upload Custom Clip</button>
+    <div class="main-container">
+        <main class="tracking-viewport">
+            <div class="toolbar">
+                <div class="mode-switcher">
+                    <button class="mode-tab active" id="tab-sim">Tracking Simulation</button>
+                    <button class="mode-tab" id="tab-upload">Analyze Custom Video</button>
                 </div>
-                <div class="view-toggles">
-                    <label class="toggle-label"><input type="checkbox" id="toggle-boxes" checked> Boxes</label>
-                    <label class="toggle-label"><input type="checkbox" id="toggle-trails" checked> Trails</label>
-                    <label class="toggle-label"><input type="checkbox" id="toggle-radar" checked> Court Radar</label>
-                    <label class="toggle-label"><input type="checkbox" id="toggle-zones" checked> Paint Zones</label>
+                <div class="layer-toggles">
+                    <label class="toggle-item"><input type="checkbox" id="toggle-boxes" checked> Bounding Boxes</label>
+                    <label class="toggle-item"><input type="checkbox" id="toggle-trails" checked> Trails</label>
+                    <label class="toggle-item"><input type="checkbox" id="toggle-zones" checked> Paint Zones</label>
+                    <label class="toggle-item"><input type="checkbox" id="toggle-minimap" checked> Tactical Radar</label>
                 </div>
             </div>
 
-            <!-- Demo Mode Viewport -->
-            <div class="view-panel active" id="panel-demo">
-                <div class="video-stage">
-                    <video id="demo-video" src="sample.mp4" playsinline muted loop preload="auto"></video>
-                    <canvas id="overlay-canvas"></canvas>
-                    <div class="canvas-hud-top">
-                        <div class="hud-pill"><span class="hud-dot live"></span> YOLOv8n + ByteTrack</div>
-                        <div class="hud-pill" id="clip-resolution-pill">640x360 @ 30 FPS</div>
-                        <div class="hud-pill mono" id="hud-frame-clock">00:00.00</div>
+            <!-- Simulation View -->
+            <div class="view-panel active" id="view-sim">
+                <div class="canvas-wrapper">
+                    <canvas id="tracking-canvas" width="960" height="540"></canvas>
+                    
+                    <div class="overlay-hud-top">
+                        <div class="hud-tag"><span class="pulse-indicator"></span> 5v5 Live Tactical Tracking</div>
+                        <div class="hud-tag mono" id="hud-clock">00:00.00</div>
+                        <div class="hud-tag mono" id="hud-fps-pill">60.0 FPS</div>
+                    </div>
+
+                    <div class="violation-callout" id="violation-callout" style="display: none;">
+                        <span class="callout-badge" id="callout-type">VIOLATION</span>
+                        <div class="callout-content">
+                            <strong id="callout-title">3-Second Key Violation</strong>
+                            <span id="callout-desc">Center #15 in paint for 3.2s</span>
+                        </div>
                     </div>
                 </div>
 
-                <div class="control-console">
-                    <div class="control-group">
-                        <button class="action-btn primary" id="btn-play-pause">Pause</button>
-                        <button class="action-btn" id="btn-slowmo">0.5x Slow-Mo</button>
-                        <button class="action-btn" id="btn-step-back">&lt; Step</button>
-                        <button class="action-btn" id="btn-step-fwd">Step &gt;</button>
-                        <button class="action-btn" id="btn-restart">Restart</button>
+                <!-- Timeline Scrubber with Preset Event Markers -->
+                <div class="timeline-container">
+                    <div class="timeline-track-wrapper" id="timeline-track-wrapper">
+                        <div class="timeline-bar" id="timeline-progress"></div>
+                        <div class="timeline-handle" id="timeline-handle"></div>
+                        
+                        <!-- Event Bookmark Pins -->
+                        <div class="event-marker bookmark-three-sec" style="left: 14%;" data-time="3.2" title="3.2s: 3-Second Paint Rule">
+                            <span class="marker-pin purple"></span>
+                        </div>
+                        <div class="event-marker bookmark-oob" style="left: 30%;" data-time="6.8" title="6.8s: Out of Bounds">
+                            <span class="marker-pin amber"></span>
+                        </div>
+                        <div class="event-marker bookmark-foul" style="left: 47%;" data-time="10.5" title="10.5s: Charging Foul">
+                            <span class="marker-pin red"></span>
+                        </div>
+                        <div class="event-marker bookmark-backcourt" style="left: 67%;" data-time="15.0" title="15.0s: Backcourt Turnover">
+                            <span class="marker-pin cyan"></span>
+                        </div>
+                        <div class="event-marker bookmark-shotclock" style="left: 95%;" data-time="21.4" title="21.4s: Shot Clock Expiration">
+                            <span class="marker-pin yellow"></span>
+                        </div>
+                    </div>
+                    <div class="timeline-labels">
+                        <span>00:00</span>
+                        <span class="timeline-hint">Click any colored marker to jump to a rule infraction</span>
+                        <span>00:22</span>
+                    </div>
+                </div>
+
+                <!-- Control Console -->
+                <div class="console-bar">
+                    <div class="btn-group">
+                        <button class="btn-ctrl primary" id="btn-sim-play">Pause</button>
+                        <button class="btn-ctrl" id="btn-sim-slowmo">0.5x Slow-Mo</button>
+                        <button class="btn-ctrl" id="btn-sim-prev-violation">&lt; Prev Call</button>
+                        <button class="btn-ctrl" id="btn-sim-next-violation">Next Call &gt;</button>
+                        <button class="btn-ctrl" id="btn-sim-restart">Replay Match</button>
                     </div>
 
-                    <div class="control-group clip-selector-group">
-                        <span class="control-label">Source Clip:</span>
-                        <select id="clip-select" class="source-select">
-                            <option value="sample.mp4">Transition Fast Break (Sample)</option>
-                            <option value="gameplay.mp4">Half-Court Possession (720p)</option>
+                    <div class="quick-jump-group">
+                        <span class="ctrl-label">Jump to Infraction:</span>
+                        <select id="jump-select" class="dropdown-ctrl">
+                            <option value="none">Select Preset Violation...</option>
+                            <option value="3.2">03.2s — 3-Second Key Rule (#15 Center)</option>
+                            <option value="6.8">06.8s — Out of Bounds (#7 Wing)</option>
+                            <option value="10.5">10.5s — Charging Foul (#3 Guard vs #9)</option>
+                            <option value="15.0">15.0s — Backcourt Turnover (#30 PG)</option>
+                            <option value="21.4">21.4s — Shot Clock Expiration (24s)</option>
                         </select>
                     </div>
-
-                    <div class="control-group metrics-group">
-                        <span class="metric-item"><span class="label">Inference:</span> <strong id="val-inference-ms">14.2 ms</strong></span>
-                        <span class="metric-item"><span class="label">FPS:</span> <strong id="val-fps">41.8</strong></span>
-                    </div>
                 </div>
             </div>
 
-            <!-- Upload Mode Viewport -->
-            <div class="view-panel" id="panel-upload">
-                <div class="upload-dropzone" id="upload-dropzone">
-                    <input type="file" id="user-file-input" accept="video/mp4,video/webm,video/quicktime" hidden>
-                    <div class="dropzone-card">
-                        <div class="dropzone-icon">
-                            <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            <!-- Upload View -->
+            <div class="view-panel" id="view-upload">
+                <div class="dropzone-container" id="video-dropzone">
+                    <input type="file" id="clip-file-input" accept="video/mp4,video/webm,video/quicktime" hidden>
+                    <div class="dropzone-body">
+                        <div class="upload-graphic">
+                            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
                             </svg>
                         </div>
-                        <h3>Drop a basketball video clip here</h3>
-                        <p>Supports MP4, WebM, and MOV up to 100 MB</p>
-                        <button class="action-btn primary browse-btn" id="btn-browse-file">Browse File</button>
+                        <h3>Upload Basketball Game or Clip</h3>
+                        <p>Drag and drop a video file (.mp4, .webm, .mov) for client & backend pipeline evaluation</p>
+                        <button class="btn-ctrl primary" id="btn-select-file">Browse File</button>
                     </div>
                 </div>
 
-                <div class="user-video-stage" id="user-video-stage" style="display: none;">
-                    <div class="video-stage">
-                        <video id="user-video" playsinline muted loop></video>
-                        <canvas id="user-overlay-canvas"></canvas>
-                        <div class="canvas-hud-top">
-                            <div class="hud-pill"><span class="hud-dot upload"></span> Client Motion Tracker</div>
-                            <div class="hud-pill mono" id="user-clip-name">custom_clip.mp4</div>
-                            <div class="hud-pill mono" id="user-frame-clock">00:00.00</div>
+                <div class="upload-player-container" id="upload-player-container" style="display: none;">
+                    <div class="canvas-wrapper">
+                        <video id="uploaded-video" playsinline muted loop></video>
+                        <canvas id="uploaded-canvas"></canvas>
+                        <div class="overlay-hud-top">
+                            <div class="hud-tag"><span class="pulse-indicator upload"></span> Video Motion & Boundary Analyzer</div>
+                            <div class="hud-tag mono" id="upload-file-tag">video.mp4</div>
+                            <div class="hud-tag mono" id="upload-clock">00:00.00</div>
                         </div>
                     </div>
 
-                    <div class="control-console">
-                        <div class="control-group">
-                            <button class="action-btn primary" id="btn-user-play-pause">Play</button>
-                            <button class="action-btn" id="btn-user-slowmo">0.5x</button>
-                            <button class="action-btn" id="btn-user-new">Choose Another Clip</button>
+                    <div class="console-bar">
+                        <div class="btn-group">
+                            <button class="btn-ctrl primary" id="btn-upload-play">Play</button>
+                            <button class="btn-ctrl" id="btn-upload-slowmo">0.5x</button>
+                            <button class="btn-ctrl" id="btn-upload-new">Upload Different Clip</button>
                         </div>
-                        <div class="control-group">
-                            <span class="control-label" id="user-video-resolution">Loading...</span>
+                        <div class="stats-group">
+                            <span class="ctrl-label" id="upload-meta-info">Resolution: Calculating...</span>
                         </div>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- Right Side: Referee Telemetry & Alerts -->
-        <aside class="sidebar-pane">
-            <div class="hud-card">
-                <div class="hud-header">
-                    <span class="card-title">Live Game State</span>
-                    <span class="badge live-status" id="pipeline-status-badge">ONLINE</span>
+        <!-- Right Side Panel: Referee Feed & Game Analytics -->
+        <aside class="sidebar-analytics">
+            <div class="analytics-card">
+                <div class="card-head">
+                    <span class="head-title">Game State & Telemetry</span>
+                    <span class="live-pill" id="live-indicator">LIVE</span>
                 </div>
-                <div class="hud-grid">
-                    <div class="hud-cell">
-                        <span class="cell-label">Possession</span>
-                        <span class="cell-val highlight" id="hud-possession-holder">#4 Forward</span>
+                <div class="metrics-grid">
+                    <div class="metric-cell">
+                        <span class="metric-lbl">Possession</span>
+                        <span class="metric-val highlight" id="stat-possession">#3 Guard (White)</span>
                     </div>
-                    <div class="hud-cell">
-                        <span class="cell-label">Shot Clock</span>
-                        <span class="cell-val clock" id="hud-shot-clock-val">24.0s</span>
+                    <div class="metric-cell">
+                        <span class="metric-lbl">Shot Clock</span>
+                        <span class="metric-val warning mono" id="stat-shotclock">24.0s</span>
                     </div>
-                    <div class="hud-cell">
-                        <span class="cell-label">Ball Location</span>
-                        <span class="cell-val" id="hud-ball-location">Frontcourt (Right)</span>
+                    <div class="metric-cell">
+                        <span class="metric-lbl">Ball Zone</span>
+                        <span class="metric-val" id="stat-ballzone">Frontcourt (Right)</span>
                     </div>
-                    <div class="hud-cell">
-                        <span class="cell-label">Tracked Players</span>
-                        <span class="cell-val" id="hud-tracked-count">8 on court</span>
+                    <div class="metric-cell">
+                        <span class="metric-lbl">Active Subjects</span>
+                        <span class="metric-val" id="stat-players">10 Players + Ball</span>
                     </div>
-                </div>
-            </div>
-
-            <div class="feed-card">
-                <div class="feed-header">
-                    <div class="feed-title-wrap">
-                        <span class="card-title">Referee Decision Log</span>
-                        <span class="badge count" id="alert-counter-badge">0</span>
-                    </div>
-                    <button class="feed-clear-btn" id="btn-clear-feed">Clear</button>
-                </div>
-                <div class="alert-stream" id="alert-stream">
-                    <!-- Populated dynamically -->
                 </div>
             </div>
 
-            <div class="export-card">
-                <button class="export-btn" id="btn-export-jsonl">Download Telemetry Log (.jsonl)</button>
-                <p class="offline-note">Runs locally with ZeroMQ and OpenCV. No video is uploaded to any cloud server.</p>
+            <div class="decision-feed-card">
+                <div class="card-head">
+                    <div class="title-with-badge">
+                        <span class="head-title">Referee Decision Log</span>
+                        <span class="count-pill" id="log-count">5 Events</span>
+                    </div>
+                    <button class="btn-text" id="btn-reset-log">Reset</button>
+                </div>
+                <div class="decision-list" id="decision-list">
+                    <!-- Event Cards populated with instant seek click handlers -->
+                </div>
+            </div>
+
+            <div class="footer-card">
+                <button class="btn-action full" id="btn-download-telemetry">Export Telemetry Data (.jsonl)</button>
+                <span class="caption">Zero cloud transmission. Full offline inference via YOLOv8n & ZeroMQ.</span>
             </div>
         </aside>
     </div>
