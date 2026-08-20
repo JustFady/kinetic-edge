@@ -13,6 +13,12 @@ import os
 import sys
 import subprocess
 
+# Ensure project root and python subfolder are in sys.path
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+for p in (PROJECT_ROOT, os.path.join(PROJECT_ROOT, "python")):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
 def main():
     parser = argparse.ArgumentParser(
         prog="kinetic-edge",

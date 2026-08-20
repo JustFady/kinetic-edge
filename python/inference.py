@@ -8,6 +8,13 @@ import os
 import yaml
 import cv2
 
+# Ensure module and project root paths are in sys.path
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+for p in (SCRIPT_DIR, PROJECT_ROOT):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
 from ipc_receiver import ZMQReceiver
 from tracker import create_backend, KineticAnomalyDetector
 from telemetry import TelemetryLogger
