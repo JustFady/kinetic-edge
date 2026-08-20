@@ -37,6 +37,10 @@ logger = logging.getLogger("kinetic.server")
 
 app = FastAPI(title="Kinetic-Edge Referee Assistant")
 
+@app.get("/health")
+async def health():
+    return {"status": "ok", "service": "kinetic-edge"}
+
 # Serve static files (CSS, JS)
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "web")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

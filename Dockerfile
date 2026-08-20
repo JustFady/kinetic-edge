@@ -1,81 +1,91 @@
 # ══════════════════════════════════════════════════════════════════════════════
-# Project Kinetic-Edge — Docker Build Environment
-# Target: Ubuntu 22.04 (CPU-only)
-# For GPU/CUDA support, swap base to nvidia/cuda:12.2.0-runtime-ubuntu22.04
-# and add onnxruntime-gpu to requirements.txt
+# Project Kinetic-Edge — Multi-stage Docker Build
+#
+# Targets:
+#   docker build -t kinetic-edge .                   # Full image (web server)
+#   docker build --target cli -t kinetic-edge-cli .  # CLI-only image
+#
+# Usage:
+#   docker run -p 8000:8000 kinetic-edge                          # Web UI
+#   docker run -v ./data:/app/data kinetic-edge-cli --video /app/data/game.mp4
+#
+# For GPU support, swap the base image:
+#   FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
 # ══════════════════════════════════════════════════════════════════════════════
 
-# ── Stage 1: Build C++ Ingest Binary ─────────────────────────────────────────
+# ── Stage 1: Build C++ ingest binary ─────────────────────────────────────────
 FROM ubuntu:22.04 AS cpp-builder
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=UTC
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    cmake \
-    pkg-config \
-    libopencv-dev \
-    libzmq3-dev \
-    libcppzmq-dev \
+    build-essential cmake pkg-config \
+    libopencv-dev libzmq3-dev libcppzmq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 COPY CMakeLists.txt ./
 COPY cpp/ ./cpp/
 
-# Placeholder sources needed for cmake configure — create stubs if not present
-RUN mkdir -p cpp/src cpp/include && \
-    touch cpp/include/ingest.h && \
-    if [ ! -f cpp/src/ingest.cpp ]; then \
-        echo 'int main() { return 0; }' > cpp/src/ingest.cpp; \
-    fi
-
 RUN cmake -B build -DCMAKE_BUILD_TYPE=Release . && \
     cmake --build build --parallel $(nproc)
 
-# ── Stage 2: Runtime Environment ─────────────────────────────────────────────
-FROM ubuntu:22.04 AS runtime
+# ── Stage 2: Python base (shared between CLI and web) ────────────────────────
+FROM ubuntu:22.04 AS python-base
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=UTC
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
-# Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libopencv-dev \
-    libzmq5 \
-    python3 \
-    python3-pip \
-    python3-dev \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
-
-# Symlink python3 → python for convenience
-RUN ln -sf /usr/bin/python3 /usr/bin/python
+    libopencv-dev libzmq5 \
+    python3 python3-pip python3-dev \
+    ffmpeg libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3 /usr/bin/python
 
 WORKDIR /app
 
-# Install Python dependencies first (layer caching)
+# Install Python deps (cached layer)
 COPY python/requirements.txt /app/python/requirements.txt
-RUN pip3 install --no-cache-dir -r /app/python/requirements.txt
+RUN pip3 install --no-cache-dir --upgrade pip && \
+    pip3 install --no-cache-dir -r /app/python/requirements.txt && \
+    pip3 install --no-cache-dir uvicorn fastapi python-multipart
 
-# Copy C++ binary from builder stage
+# Copy C++ binary from builder
 COPY --from=cpp-builder /build/build/ingest /app/bin/ingest
+RUN chmod +x /app/bin/ingest
 
-# Copy project files
+# Copy project source
 COPY config/ /app/config/
 COPY python/ /app/python/
 COPY scripts/ /app/scripts/
-COPY data/ /app/data/
+COPY server.py /app/server.py
+COPY web/ /app/web/
+COPY yolov8n.pt /app/yolov8n.pt
+COPY kinetic_edge/ /app/kinetic_edge/
+COPY pyproject.toml /app/pyproject.toml
 
-# Make scripts executable
-RUN chmod +x /app/scripts/*.sh /app/bin/ingest
+RUN chmod +x /app/scripts/*.sh
 
-# Health check — verify both binaries are functional
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD /app/bin/ingest --help && python3 -c "import ultralytics; import zmq" || exit 1
+# Pre-download model weights into the image so first run is instant
+RUN python3 -c "from ultralytics import YOLO; YOLO('yolov8n.pt')" 2>/dev/null || true
+
+# ── Stage 3: CLI target ──────────────────────────────────────────────────────
+FROM python-base AS cli
+
+# Mount your video files into /app/data at runtime
+VOLUME ["/app/data", "/app/output"]
 
 ENTRYPOINT ["/app/scripts/run_pipeline.sh"]
 CMD ["--config", "/app/config/pipeline.yaml"]
+
+# ── Stage 4: Web server target (default) ─────────────────────────────────────
+FROM python-base AS web
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+
+CMD ["python3", "server.py"]

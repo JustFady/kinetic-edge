@@ -1,0 +1,34 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Kinetic-Edge — Docker Compose
+#
+# Usage:
+#   docker compose up          # Start the web server on port 8000
+#   docker compose up cli      # Run the CLI pipeline on data/sample.mp4
+# ══════════════════════════════════════════════════════════════════════════════
+
+services:
+  web:
+    build:
+      context: .
+      target: web
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+      - ./config:/app/config
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  cli:
+    build:
+      context: .
+      target: cli
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+      - ./config:/app/config
+    profiles:
+      - cli
+    command: ["--config", "/app/config/pipeline.yaml", "--video", "/app/data/sample.mp4"]

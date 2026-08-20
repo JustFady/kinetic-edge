@@ -1,0 +1,13 @@
+.git
+.github
+.venv
+__pycache__
+*.pyc
+*.egg-info
+dist/
+build/
+output/
+docs/
+huggingface/
+*.DS_Store
+node_modules/

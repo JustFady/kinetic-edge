@@ -3,110 +3,168 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Kinetic-Edge Basketball Referee Assistant — AI-powered offline video analysis for real-time referee support">
-    <title>Kinetic-Edge | Referee Assistant</title>
+    <meta name="description" content="Kinetic-Edge is an offline computer vision pipeline for real-time basketball player and ball tracking, boundary enforcement, and referee assistance.">
+    <title>Kinetic-Edge — Video AI Referee Assistant</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Top Stats Bar -->
-    <header id="stats-bar">
-        <div class="logo">
-            <div class="logo-icon">⚡</div>
-            <div>
-                <h1>KINETIC-EDGE</h1>
-                <span class="subtitle">Offline Referee Assistant</span>
+    <header class="navbar">
+        <div class="nav-brand">
+            <span class="brand-badge">KE</span>
+            <div class="brand-text">
+                <span class="brand-title">Kinetic-Edge</span>
+                <span class="brand-desc">Local Computer Vision Pipeline</span>
             </div>
         </div>
-        <div class="stats">
-            <div class="stat" id="stat-fps">
-                <span class="stat-value">0</span>
-                <span class="stat-label">FPS</span>
-            </div>
-            <div class="stat" id="stat-players">
-                <span class="stat-value">0</span>
-                <span class="stat-label">Players</span>
-            </div>
-            <div class="stat" id="stat-alerts">
-                <span class="stat-value">0</span>
-                <span class="stat-label">Alerts</span>
-            </div>
-            <div class="stat" id="stat-frames">
-                <span class="stat-value">0 / 0</span>
-                <span class="stat-label">Frames</span>
-            </div>
-        </div>
-        <div class="status-actions">
-            <button id="new-clip-btn" class="btn-action hidden" title="Analyze New Clip">
-                <span>➕ New Clip</span>
-            </button>
-            <div class="status-badge" id="status-badge">
-                <span class="status-dot"></span>
-                <span class="status-text">Ready (Offline)</span>
-            </div>
+        <div class="nav-links">
+            <a href="https://pypi.org/project/kinetic-edge/" class="nav-btn pypi" target="_blank" rel="noopener">pip install kinetic-edge</a>
+            <a href="https://github.com/JustFady/kinetic-edge/releases/tag/v1.0.0" class="nav-btn" target="_blank" rel="noopener">Download v1.0.0</a>
+            <a href="https://github.com/JustFady/kinetic-edge" class="nav-btn github" target="_blank" rel="noopener">GitHub</a>
         </div>
     </header>
 
-    <main>
-        <!-- Video Feed Area -->
-        <section id="video-section">
-            <!-- Drop Zone (shown when no video is loaded) -->
-            <div id="drop-zone" class="drop-zone">
-                <div class="drop-zone-content">
-                    <div class="drop-icon">
-                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                            <polyline points="17 8 12 3 7 8"/>
-                            <line x1="12" y1="3" x2="12" y2="15"/>
-                        </svg>
-                    </div>
-                    <h2>Drop a Game Clip</h2>
-                    <p>Drag & drop any basketball footage or <button id="browse-btn" class="browse-link">browse files</button></p>
-                    <input type="file" id="file-input" accept="video/mp4,video/*" hidden>
-                    <div class="supported-formats">100% Offline · YOLOv8 Local AI · MP4 / MOV / AVI</div>
+    <div class="app-layout">
+        <section class="viewport-pane">
+            <div class="tab-strip">
+                <div class="tabs-left">
+                    <button class="tab-btn active" id="tab-demo" data-target="demo">Sample Match Analysis</button>
+                    <button class="tab-btn" id="tab-upload" data-target="upload">Upload Custom Clip</button>
                 </div>
-                <div class="drop-zone-border"></div>
+                <div class="view-toggles">
+                    <label class="toggle-label"><input type="checkbox" id="toggle-boxes" checked> Boxes</label>
+                    <label class="toggle-label"><input type="checkbox" id="toggle-trails" checked> Trails</label>
+                    <label class="toggle-label"><input type="checkbox" id="toggle-radar" checked> Court Radar</label>
+                    <label class="toggle-label"><input type="checkbox" id="toggle-zones" checked> Paint Zones</label>
+                </div>
             </div>
 
-            <!-- Video Canvas (shown during processing) -->
-            <div id="video-container" class="video-container hidden">
-                <canvas id="video-canvas"></canvas>
-                <div id="video-overlay" class="video-overlay">
-                    <div class="overlay-badge" id="overlay-mode">AI TRACKING ACTIVE</div>
-                </div>
-                
-                <!-- Referee Decision Controls -->
-                <div class="referee-controls">
-                    <button id="pause-btn" class="control-btn" title="Pause / Resume">⏸️ Pause</button>
-                    <button id="slowmo-btn" class="control-btn" title="Toggle Slow Motion Replay">🐢 0.5x Slow-Mo</button>
-                    <button id="export-btn" class="control-btn" title="Open Annotated Clip">🎬 Open Output Clip</button>
+            <!-- Demo Mode Viewport -->
+            <div class="view-panel active" id="panel-demo">
+                <div class="video-stage">
+                    <video id="demo-video" src="sample.mp4" playsinline muted loop preload="auto"></video>
+                    <canvas id="overlay-canvas"></canvas>
+                    <div class="canvas-hud-top">
+                        <div class="hud-pill"><span class="hud-dot live"></span> YOLOv8n + ByteTrack</div>
+                        <div class="hud-pill" id="clip-resolution-pill">640x360 @ 30 FPS</div>
+                        <div class="hud-pill mono" id="hud-frame-clock">00:00.00</div>
+                    </div>
                 </div>
 
-                <!-- Progress bar -->
-                <div id="progress-bar" class="progress-bar">
-                    <div id="progress-fill" class="progress-fill"></div>
+                <div class="control-console">
+                    <div class="control-group">
+                        <button class="action-btn primary" id="btn-play-pause">Pause</button>
+                        <button class="action-btn" id="btn-slowmo">0.5x Slow-Mo</button>
+                        <button class="action-btn" id="btn-step-back">&lt; Step</button>
+                        <button class="action-btn" id="btn-step-fwd">Step &gt;</button>
+                        <button class="action-btn" id="btn-restart">Restart</button>
+                    </div>
+
+                    <div class="control-group clip-selector-group">
+                        <span class="control-label">Source Clip:</span>
+                        <select id="clip-select" class="source-select">
+                            <option value="sample.mp4">Transition Fast Break (Sample)</option>
+                            <option value="gameplay.mp4">Half-Court Possession (720p)</option>
+                        </select>
+                    </div>
+
+                    <div class="control-group metrics-group">
+                        <span class="metric-item"><span class="label">Inference:</span> <strong id="val-inference-ms">14.2 ms</strong></span>
+                        <span class="metric-item"><span class="label">FPS:</span> <strong id="val-fps">41.8</strong></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Upload Mode Viewport -->
+            <div class="view-panel" id="panel-upload">
+                <div class="upload-dropzone" id="upload-dropzone">
+                    <input type="file" id="user-file-input" accept="video/mp4,video/webm,video/quicktime" hidden>
+                    <div class="dropzone-card">
+                        <div class="dropzone-icon">
+                            <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                            </svg>
+                        </div>
+                        <h3>Drop a basketball video clip here</h3>
+                        <p>Supports MP4, WebM, and MOV up to 100 MB</p>
+                        <button class="action-btn primary browse-btn" id="btn-browse-file">Browse File</button>
+                    </div>
+                </div>
+
+                <div class="user-video-stage" id="user-video-stage" style="display: none;">
+                    <div class="video-stage">
+                        <video id="user-video" playsinline muted loop></video>
+                        <canvas id="user-overlay-canvas"></canvas>
+                        <div class="canvas-hud-top">
+                            <div class="hud-pill"><span class="hud-dot upload"></span> Client Motion Tracker</div>
+                            <div class="hud-pill mono" id="user-clip-name">custom_clip.mp4</div>
+                            <div class="hud-pill mono" id="user-frame-clock">00:00.00</div>
+                        </div>
+                    </div>
+
+                    <div class="control-console">
+                        <div class="control-group">
+                            <button class="action-btn primary" id="btn-user-play-pause">Play</button>
+                            <button class="action-btn" id="btn-user-slowmo">0.5x</button>
+                            <button class="action-btn" id="btn-user-new">Choose Another Clip</button>
+                        </div>
+                        <div class="control-group">
+                            <span class="control-label" id="user-video-resolution">Loading...</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>
 
-        <!-- Alerts Sidebar -->
-        <aside id="alerts-panel">
-            <div class="panel-header">
-                <h2>🏀 Referee Decision Feed</h2>
-                <button id="clear-alerts" class="btn-icon" title="Clear alerts">✕</button>
-            </div>
-            <div id="alerts-list" class="alerts-list">
-                <div class="empty-state">
-                    <div class="empty-icon">📋</div>
-                    <p>No referee calls yet</p>
-                    <span>Load game video to begin automated tracking</span>
+        <!-- Right Side: Referee Telemetry & Alerts -->
+        <aside class="sidebar-pane">
+            <div class="hud-card">
+                <div class="hud-header">
+                    <span class="card-title">Live Game State</span>
+                    <span class="badge live-status" id="pipeline-status-badge">ONLINE</span>
+                </div>
+                <div class="hud-grid">
+                    <div class="hud-cell">
+                        <span class="cell-label">Possession</span>
+                        <span class="cell-val highlight" id="hud-possession-holder">#4 Forward</span>
+                    </div>
+                    <div class="hud-cell">
+                        <span class="cell-label">Shot Clock</span>
+                        <span class="cell-val clock" id="hud-shot-clock-val">24.0s</span>
+                    </div>
+                    <div class="hud-cell">
+                        <span class="cell-label">Ball Location</span>
+                        <span class="cell-val" id="hud-ball-location">Frontcourt (Right)</span>
+                    </div>
+                    <div class="hud-cell">
+                        <span class="cell-label">Tracked Players</span>
+                        <span class="cell-val" id="hud-tracked-count">8 on court</span>
+                    </div>
                 </div>
             </div>
-        </aside>
-    </main>
 
-    <script src="/static/app.js"></script>
+            <div class="feed-card">
+                <div class="feed-header">
+                    <div class="feed-title-wrap">
+                        <span class="card-title">Referee Decision Log</span>
+                        <span class="badge count" id="alert-counter-badge">0</span>
+                    </div>
+                    <button class="feed-clear-btn" id="btn-clear-feed">Clear</button>
+                </div>
+                <div class="alert-stream" id="alert-stream">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+
+            <div class="export-card">
+                <button class="export-btn" id="btn-export-jsonl">Download Telemetry Log (.jsonl)</button>
+                <p class="offline-note">Runs locally with ZeroMQ and OpenCV. No video is uploaded to any cloud server.</p>
+            </div>
+        </aside>
+    </div>
+
+    <script src="app.js"></script>
 </body>
 </html>
