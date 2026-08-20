@@ -64,3 +64,17 @@ A continuous record of technical implementations, architecture decisions, bug fi
 - [ ] Automated court perspective homography calibration.
 - [ ] Jersey color k-means clustering for automated team assignment.
 - [ ] PDF match summary report generation.
+
+### Phase 6: Computer Vision Tracking Simulation & Preset Infractions
+- Rebuilt the showcase into an authentic 2D tactical basketball tracking simulation (Second Spectrum / CourtOptix style):
+  - 10 tracked players (5v5 offense vs defense) with jersey numbers, roles, speed indicators (mph), velocity trails, and team color palettes.
+  - Authentic half-court set: high pick-and-roll, drive and kick, defensive collapse, baseline cut, and rebound contest.
+  - 5 preset referee infractions mapped along an interactive timeline scrubber:
+    - `03.2s`: 3-Second Paint Rule (#15 Center).
+    - `06.8s`: Sideline Out of Bounds (#7 Wing).
+    - `10.5s`: Charging Foul / Illegal Contact (#3 Guard vs #9 Defender).
+    - `15.0s`: Backcourt Turnover (#30 PG).
+    - `21.4s`: 24-Second Shot Clock Expiration.
+  - Interactive timeline scrubber with color-coded event bookmarks and instant jumping to any infraction.
+  - Interactive Decision Log where clicking any call card immediately jumps the simulation to that timestamp, highlights the offending player, and displays the violation callout.
+  - Dedicated "Analyze Custom Video" tab for drag & drop file upload with motion tracking and court boundary analysis.
