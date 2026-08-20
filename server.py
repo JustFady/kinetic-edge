@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "python"))
 
 from tracker import create_backend, KineticAnomalyDetector, Detection
 from ipc_receiver import ZMQReceiver
+from rules import BasketballRulesEngine, RuleViolation
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 logger = logging.getLogger("kinetic.server")
@@ -224,6 +225,10 @@ async def run_pipeline(job: Job):
     court_boundary = tuple(anomaly_cfg.get("court_boundary", [0.05, 0.05, 0.95, 0.95]))
     anomaly_detector = KineticAnomalyDetector(court_boundary=court_boundary)
 
+    # Basketball rules engine
+    rules_cfg = cfg.get("rules", {})
+    rules_engine = BasketballRulesEngine(court_cfg=anomaly_cfg, rules_cfg=rules_cfg)
+
     cap = cv2.VideoCapture(job.video_path)
     if not cap.isOpened():
         job.status = "error"
@@ -249,19 +254,24 @@ async def run_pipeline(job: Job):
             detections = backend.predict(resized, frame_id)
             timestamp_us = int(time.time() * 1_000_000)
             anomalies = anomaly_detector.update(detections, timestamp_us, frame_w, frame_h)
+            rule_violations = rules_engine.update(detections, frame_id, timestamp_us, frame_w, frame_h)
 
-            annotated = annotate_frame(resized, detections, anomalies, court_boundary, frame_w, frame_h)
+            annotated = annotate_frame(resized, detections, anomalies, court_boundary, frame_w, frame_h,
+                                       rule_violations=rule_violations, rules_engine=rules_engine)
 
             writer.write(annotated)
 
             _, jpeg = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 75])
             jpeg_bytes = jpeg.tobytes()
 
+            pinfo = rules_engine.possession_info
             meta = {
                 "type": "frame_meta",
                 "frame_id": frame_id,
                 "detections": len(detections),
                 "anomalies": len(anomalies),
+                "rule_violations": len(rule_violations),
+                "possession": pinfo,
             }
             await broadcast_frame(job, jpeg_bytes, meta)
 
@@ -272,6 +282,17 @@ async def run_pipeline(job: Job):
                     "title": format_alert_title(a),
                     "detail": format_alert_detail(a),
                     "severity": map_severity(a.get("type", "")),
+                }
+                await broadcast_alert(job, alert_msg)
+
+            # Broadcast rule-based violations as alerts too
+            for rv in rule_violations:
+                alert_msg = {
+                    "type": rv.rule,
+                    "frame_id": frame_id,
+                    "title": rv.title,
+                    "detail": rv.detail,
+                    "severity": rv.severity,
                 }
                 await broadcast_alert(job, alert_msg)
 
@@ -301,8 +322,10 @@ async def run_pipeline(job: Job):
     logger.info("Pipeline complete for job %s: %d frames processed", job.job_id, frame_id)
 
 
-def annotate_frame(frame, detections, anomalies, court_boundary, frame_w, frame_h):
+def annotate_frame(frame, detections, anomalies, court_boundary, frame_w, frame_h,
+                   rule_violations=None, rules_engine=None):
     annotated = frame.copy()
+    rule_violations = rule_violations or []
 
     # Court boundary line
     bx0, by0, bx1, by1 = court_boundary
@@ -310,13 +333,31 @@ def annotate_frame(frame, detections, anomalies, court_boundary, frame_w, frame_
     x1, y1 = int(bx1 * frame_w), int(by1 * frame_h)
     cv2.rectangle(annotated, (x0, y0), (x1, y1), (0, 255, 255), 1)
 
+    # Draw paint zones and half-court if rules engine available
+    if rules_engine is not None:
+        court = rules_engine.court
+        for paint in (court.left_paint, court.right_paint):
+            px0, py0 = int(paint[0] * frame_w), int(paint[1] * frame_h)
+            px1, py1 = int(paint[2] * frame_w), int(paint[3] * frame_h)
+            overlay = annotated.copy()
+            cv2.rectangle(overlay, (px0, py0), (px1, py1), (180, 100, 255), -1)
+            cv2.addWeighted(overlay, 0.15, annotated, 0.85, 0, annotated)
+            cv2.rectangle(annotated, (px0, py0), (px1, py1), (180, 100, 255), 1)
+
+        # Half-court line
+        hc_x = int(court.half_court_x * frame_w)
+        cv2.line(annotated, (hc_x, y0), (hc_x, y1), (200, 200, 200), 1, cv2.LINE_AA)
+
+    # Collect flagged track IDs from both anomalies and rule violations
     anomaly_track_ids = {a.get("track_id") for a in anomalies}
+    violation_track_ids = {v.track_id for v in rule_violations}
+    flagged_ids = anomaly_track_ids | violation_track_ids
 
     for det in detections:
         bbox = [int(v) for v in det.bbox]
-        is_anomaly = det.track_id in anomaly_track_ids
+        is_flagged = det.track_id in flagged_ids
 
-        if is_anomaly:
+        if is_flagged:
             color = (0, 0, 255)
             thickness = 3
         elif det.class_name == "sports ball":
@@ -338,7 +379,26 @@ def annotate_frame(frame, detections, anomalies, court_boundary, frame_w, frame_
         cv2.putText(annotated, label, (bbox[0] + 3, bbox[1] - 4),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
 
-    if anomalies:
+    # Possession + shot clock HUD at bottom
+    if rules_engine is not None:
+        pinfo = rules_engine.possession_info
+        if pinfo["possessing_track"] is not None:
+            shot_text = f"Possession: #{pinfo['possessing_track']}  Shot Clock: {pinfo['shot_clock_remaining']:.1f}s"
+            cv2.rectangle(annotated, (0, frame_h - 28), (frame_w, frame_h), (0, 0, 0), -1)
+            cv2.putText(annotated, shot_text, (10, frame_h - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+    # Top banner for violations
+    total_alerts = len(anomalies) + len(rule_violations)
+    if rule_violations:
+        cv2.rectangle(annotated, (0, 0), (frame_w, 32), (0, 0, 180), -1)
+        titles = [v.title for v in rule_violations]
+        banner = " | ".join(titles[:3])
+        if total_alerts > 3:
+            banner += f" (+{total_alerts - 3} more)"
+        cv2.putText(annotated, banner, (10, 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    elif anomalies:
         cv2.rectangle(annotated, (0, 0), (frame_w, 32), (0, 0, 180), -1)
         cv2.putText(annotated, f"ALERT: {len(anomalies)} anomal{'y' if len(anomalies)==1 else 'ies'} detected",
                     (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)

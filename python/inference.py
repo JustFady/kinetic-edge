@@ -18,6 +18,7 @@ for p in (SCRIPT_DIR, PROJECT_ROOT):
 from ipc_receiver import ZMQReceiver
 from tracker import create_backend, KineticAnomalyDetector
 from telemetry import TelemetryLogger
+from rules import BasketballRulesEngine
 
 running = True
 def signal_handler(sig, frame):
@@ -67,6 +68,10 @@ def main():
     court_boundary = tuple(anomaly_cfg.get("court_boundary", [0.05, 0.05, 0.95, 0.95]))
     anomaly = KineticAnomalyDetector(court_boundary=court_boundary)
     telemetry = TelemetryLogger()
+
+    # Basketball rules engine
+    rules_cfg = cfg.get("rules", {})
+    rules_engine = BasketballRulesEngine(court_cfg=anomaly_cfg, rules_cfg=rules_cfg)
     
     receiver.start()
     telemetry.start()
@@ -101,6 +106,7 @@ def main():
         metrics = telemetry.record_receive(header.frame_id, header.timestamp_us)
         detections = backend.predict(frame, header.frame_id)
         anomalies = anomaly.update(detections, header.timestamp_us, frame_w, frame_h)
+        rule_violations = rules_engine.update(detections, header.frame_id, header.timestamp_us, frame_w, frame_h)
         
         # Draw on frame
         annotated_frame = frame.copy()
@@ -113,20 +119,58 @@ def main():
         cv2.putText(annotated_frame, "Court Boundary", (x0 + 10, y0 + 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
+        # Draw paint zones
+        court = rules_engine.court
+        for paint in (court.left_paint, court.right_paint):
+            px0, py0 = int(paint[0] * frame_w), int(paint[1] * frame_h)
+            px1, py1 = int(paint[2] * frame_w), int(paint[3] * frame_h)
+            overlay = annotated_frame.copy()
+            cv2.rectangle(overlay, (px0, py0), (px1, py1), (180, 100, 255), -1)
+            cv2.addWeighted(overlay, 0.15, annotated_frame, 0.85, 0, annotated_frame)
+            cv2.rectangle(annotated_frame, (px0, py0), (px1, py1), (180, 100, 255), 1)
+
+        # Draw half-court line
+        hc_x = int(court.half_court_x * frame_w)
+        cv2.line(annotated_frame, (hc_x, y0), (hc_x, y1), (200, 200, 200), 1, cv2.LINE_AA)
+
+        # Collect track IDs involved in any violation for color coding
+        violation_track_ids = {v.track_id for v in rule_violations}
+        anomaly_track_ids = {a.get("track_id") for a in anomalies}
+        flagged_ids = violation_track_ids | anomaly_track_ids
+
         # Draw detections
         for det in detections:
             bbox = [int(v) for v in det.bbox]
-            # Check if this track is involved in boundary violation
-            is_anomaly = any(a.get("track_id") == det.track_id for a in anomalies)
-            color = (0, 0, 255) if is_anomaly else (0, 255, 0)
+            is_flagged = det.track_id in flagged_ids
+            
+            if det.class_name == "sports ball":
+                color = (0, 165, 255)  # orange for ball
+            elif is_flagged:
+                color = (0, 0, 255)    # red for flagged players
+            else:
+                color = (0, 255, 100)  # green for normal players
             
             cv2.rectangle(annotated_frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 2)
             label = f"{det.class_name} #{det.track_id} ({det.confidence:.2f})"
             cv2.putText(annotated_frame, label, (bbox[0], bbox[1] - 8),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-            
-        # Draw anomaly alerts
-        if anomalies:
+
+        # Draw possession + shot clock HUD
+        pinfo = rules_engine.possession_info
+        if pinfo["possessing_track"] is not None:
+            shot_text = f"Possession: #{pinfo['possessing_track']}  Shot Clock: {pinfo['shot_clock_remaining']:.1f}s"
+            cv2.putText(annotated_frame, shot_text, (10, frame_h - 15),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+        # Draw rule violations banner
+        if rule_violations:
+            # Red banner at top
+            cv2.rectangle(annotated_frame, (0, 0), (frame_w, 28), (0, 0, 180), -1)
+            titles = [v.title for v in rule_violations]
+            banner = " | ".join(titles[:3])
+            cv2.putText(annotated_frame, banner, (10, 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        elif anomalies:
             cv2.putText(annotated_frame, "ANOMALY DETECTED!", (20, 40),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
         
@@ -145,7 +189,7 @@ def main():
                 print(f"WARNING: Failed to show GUI window: {e}. Running in headless mode.")
                 gui_failed = True
                 
-        telemetry.record_inference(metrics, len(detections), len(anomalies))
+        telemetry.record_inference(metrics, len(detections), len(anomalies) + len(rule_violations))
         
     if video_writer is not None:
         video_writer.release()

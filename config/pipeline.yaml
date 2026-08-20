@@ -56,6 +56,24 @@ tracking:
     # Default: full frame (no boundary enforcement)
     court_boundary: [0.05, 0.05, 0.95, 0.95]
 
+
+# ── Basketball Rules Engine ──────────────────────────────────────────────────
+rules:
+  # Shot clock duration in seconds (NBA = 24, FIBA = 24, college = 30)
+  shot_clock_sec: 24.0
+  # 3-second paint rule limit
+  paint_limit_sec: 3.0
+  # IoU threshold for flagging player-to-player contact as a potential foul
+  foul_overlap_ratio: 0.30
+  # Max pixel distance between ball center and player center to assign possession
+  possession_dist_px: 80
+  # Minimum frames between re-firing the same violation (debounce)
+  debounce_frames: 30
+  # Court zone overrides (normalized 0-1 coordinates)
+  # half_court_x: 0.50
+  # left_paint:   [0.05, 0.28, 0.22, 0.72]
+  # right_paint:  [0.78, 0.28, 0.95, 0.72]
+
 # ── Telemetry & Logging ──────────────────────────────────────────────────────
 telemetry:
   # Log level: DEBUG, INFO, WARNING, ERROR
